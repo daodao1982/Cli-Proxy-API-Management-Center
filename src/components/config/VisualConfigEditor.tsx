@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -7,6 +7,7 @@ import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { ConfigSection } from '@/components/config/ConfigSection';
 import { useNotificationStore } from '@/stores';
+import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
 import styles from './VisualConfigEditor.module.scss';
 import { copyToClipboard } from '@/utils/clipboard';
 import type {
@@ -101,10 +102,25 @@ function ApiKeysCardEditor({
     [value]
   );
 
+  const [lifecycleMap, setLifecycleMap] = useState<Record<string, ApiKeyLifecycleItem>>({});
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [formError, setFormError] = useState('');
+  const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent'>('12h');
+  const [customExpiresAt, setCustomExpiresAt] = useState('');
+
+  const lifecycleOptions = useMemo(
+    () => [
+      { value: '12h', label: '12h' },
+      { value: '7d', label: '7天' },
+      { value: 'custom', label: '自定义' },
+      { value: 'permanent', label: '永久' },
+    ],
+    []
+  );
 
   function generateSecureApiKey(): string {
     const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -113,17 +129,47 @@ function ApiKeysCardEditor({
     return 'sk-' + Array.from(array, (b) => charset[b % charset.length]).join('');
   }
 
+  const loadLifecycle = async () => {
+    setLifecycleLoading(true);
+    try {
+      const items = await apiKeysApi.listLifecycle();
+      const nextMap: Record<string, ApiKeyLifecycleItem> = {};
+      items.forEach((item) => {
+        const key = String(item.key || '').trim();
+        if (!key) return;
+        nextMap[key] = item;
+      });
+      setLifecycleMap(nextMap);
+    } catch {
+      // ignore when backend not upgraded yet
+    } finally {
+      setLifecycleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLifecycle().catch(() => {
+      // ignore
+    });
+  }, []);
+
   const openAddModal = () => {
     setEditingIndex(null);
     setInputValue('');
     setFormError('');
+    setPreset('12h');
+    setCustomExpiresAt('');
     setModalOpen(true);
   };
 
   const openEditModal = (index: number) => {
+    const target = apiKeys[index] ?? '';
+    const life = lifecycleMap[target];
     setEditingIndex(index);
-    setInputValue(apiKeys[index] ?? '');
+    setInputValue(target);
     setFormError('');
+    setPreset((life?.preset as '12h' | '7d' | 'custom' | 'permanent') || '12h');
+    setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
     setModalOpen(true);
   };
 
@@ -132,17 +178,27 @@ function ApiKeysCardEditor({
     setInputValue('');
     setEditingIndex(null);
     setFormError('');
+    setPreset('12h');
+    setCustomExpiresAt('');
   };
 
   const updateApiKeys = (nextKeys: string[]) => {
     onChange(nextKeys.join('\n'));
   };
 
-  const handleDelete = (index: number) => {
+  const handleDelete = async (index: number) => {
+    const key = apiKeys[index];
     updateApiKeys(apiKeys.filter((_, i) => i !== index));
+    if (!key) return;
+    try {
+      await apiKeysApi.deleteLifecycleKey(key);
+      await loadLifecycle();
+    } catch {
+      // ignore for old backend
+    }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmed = inputValue.trim();
     if (!trimmed) {
       setFormError(t('config_management.visual.api_keys.error_empty'));
@@ -152,12 +208,29 @@ function ApiKeysCardEditor({
       setFormError(t('config_management.visual.api_keys.error_invalid'));
       return;
     }
+    if (preset === 'custom' && !customExpiresAt.trim()) {
+      setFormError('自定义有效期需要选择到期时间');
+      return;
+    }
 
     const nextKeys =
       editingIndex === null
         ? [...apiKeys, trimmed]
         : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key));
     updateApiKeys(nextKeys);
+
+    try {
+      await apiKeysApi.setLifecycle({
+        key: trimmed,
+        preset,
+        expiresAt: preset === 'custom' ? new Date(customExpiresAt).toISOString() : undefined,
+      });
+      await loadLifecycle();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '设置生命周期失败';
+      showNotification(message, 'warning');
+    }
+
     closeModal();
   };
 
@@ -172,6 +245,46 @@ function ApiKeysCardEditor({
   const handleGenerate = () => {
     setInputValue(generateSecureApiKey());
     setFormError('');
+  };
+
+  const handleDisable = async (key: string) => {
+    try {
+      await apiKeysApi.disableLifecycleKey(key);
+      updateApiKeys(apiKeys.filter((k) => k !== key));
+      await loadLifecycle();
+      showNotification('已禁用', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '禁用失败';
+      showNotification(message, 'error');
+    }
+  };
+
+  const handleEnable = async (key: string) => {
+    try {
+      await apiKeysApi.enableLifecycleKey(key);
+      if (!apiKeys.includes(key)) {
+        updateApiKeys([...apiKeys, key]);
+      }
+      await loadLifecycle();
+      showNotification('已启用', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '启用失败';
+      showNotification(message, 'error');
+    }
+  };
+
+  const renderLifecycleText = (key: string) => {
+    const life = lifecycleMap[key];
+    if (!life) return '未设置有效期';
+    if (life.disabled) {
+      return `已禁用${life.disabledReason ? ` · ${life.disabledReason}` : ''}`;
+    }
+    if (!life.expiresAt) return '永久';
+    try {
+      return `到期: ${new Date(life.expiresAt).toLocaleString()}`;
+    } catch {
+      return `到期: ${life.expiresAt}`;
+    }
   };
 
   return (
@@ -197,30 +310,46 @@ function ApiKeysCardEditor({
         </div>
       ) : (
         <div className="item-list" style={{ marginTop: 4 }}>
-          {apiKeys.map((key, index) => (
-            <div key={`${key}-${index}`} className="item-row">
-              <div className="item-meta">
-                <div className="pill">#{index + 1}</div>
-                <div className="item-title">API Key</div>
-                <div className="item-subtitle">{maskApiKey(String(key || ''))}</div>
+          {apiKeys.map((key, index) => {
+            const life = lifecycleMap[key];
+            const disabledState = Boolean(life?.disabled);
+            return (
+              <div key={`${key}-${index}`} className="item-row">
+                <div className="item-meta">
+                  <div className="pill">#{index + 1}</div>
+                  <div className="item-title">API Key</div>
+                  <div className="item-subtitle">{maskApiKey(String(key || ''))}</div>
+                  <div className="item-subtitle" style={{ marginTop: 4 }}>
+                    {lifecycleLoading ? '读取有效期中...' : renderLifecycleText(key)}
+                  </div>
+                </div>
+                <div className="item-actions" style={{ display: 'flex', flexWrap: 'wrap' }}>
+                  <Button variant="secondary" size="sm" onClick={() => handleCopy(key)} disabled={disabled}>
+                    {t('common.copy')}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => openEditModal(index)} disabled={disabled}>
+                    {t('config_management.visual.common.edit')}
+                  </Button>
+                  {disabledState ? (
+                    <Button variant="secondary" size="sm" onClick={() => handleEnable(key)} disabled={disabled}>
+                      手动启用
+                    </Button>
+                  ) : (
+                    <Button variant="secondary" size="sm" onClick={() => handleDisable(key)} disabled={disabled}>
+                      到期禁用/手动禁用
+                    </Button>
+                  )}
+                  <Button variant="danger" size="sm" onClick={() => handleDelete(index)} disabled={disabled}>
+                    手动删除
+                  </Button>
+                </div>
               </div>
-              <div className="item-actions">
-                <Button variant="secondary" size="sm" onClick={() => handleCopy(key)} disabled={disabled}>
-                  {t('common.copy')}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => openEditModal(index)} disabled={disabled}>
-                  {t('config_management.visual.common.edit')}
-                </Button>
-                <Button variant="danger" size="sm" onClick={() => handleDelete(index)} disabled={disabled}>
-                  {t('config_management.visual.common.delete')}
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      <div className="hint">{t('config_management.visual.api_keys.hint')}</div>
+      <div className="hint">支持 12h / 7天 / 自定义 / 永久；到期自动禁用，可手动启用或删除。</div>
 
       <Modal
         open={modalOpen}
@@ -258,6 +387,26 @@ function ApiKeysCardEditor({
             </Button>
           }
         />
+
+        <div className="form-group" style={{ marginTop: 12 }}>
+          <label>有效期</label>
+          <Select
+            value={preset}
+            options={lifecycleOptions}
+            disabled={disabled}
+            onChange={(v) => setPreset((v as '12h' | '7d' | 'custom' | 'permanent') || '12h')}
+          />
+        </div>
+
+        {preset === 'custom' && (
+          <Input
+            label="自定义到期时间"
+            type="datetime-local"
+            value={customExpiresAt}
+            onChange={(e) => setCustomExpiresAt(e.target.value)}
+            disabled={disabled}
+          />
+        )}
       </Modal>
     </div>
   );
