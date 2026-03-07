@@ -103,14 +103,34 @@ function ApiKeysCardEditor({
   );
 
   const [lifecycleMap, setLifecycleMap] = useState<Record<string, ApiKeyLifecycleItem>>({});
+  const displayKeys = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    apiKeys.forEach((key) => {
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      result.push(key);
+    });
+
+    Object.keys(lifecycleMap).forEach((key) => {
+      const trimmed = String(key || '').trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      result.push(trimmed);
+    });
+
+    return result;
+  }, [apiKeys, lifecycleMap]);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [formError, setFormError] = useState('');
-  const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent'>('12h');
+  const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent' | 'disabled'>('12h');
   const [customExpiresAt, setCustomExpiresAt] = useState('');
+  const [labelValue, setLabelValue] = useState('');
 
   const lifecycleOptions = useMemo(
     () => [
@@ -118,6 +138,7 @@ function ApiKeysCardEditor({
       { value: '7d', label: '7天' },
       { value: 'custom', label: '自定义' },
       { value: 'permanent', label: '永久' },
+      { value: 'disabled', label: '停用' },
     ],
     []
   );
@@ -159,17 +180,24 @@ function ApiKeysCardEditor({
     setFormError('');
     setPreset('12h');
     setCustomExpiresAt('');
+    setLabelValue('');
     setModalOpen(true);
   };
 
-  const openEditModal = (index: number) => {
-    const target = apiKeys[index] ?? '';
+  const openEditModal = (key: string) => {
+    const target = String(key || '').trim();
+    if (!target) return;
+    const index = apiKeys.findIndex((item) => item === target);
     const life = lifecycleMap[target];
-    setEditingIndex(index);
+    setEditingIndex(index >= 0 ? index : null);
     setInputValue(target);
     setFormError('');
-    setPreset((life?.preset as '12h' | '7d' | 'custom' | 'permanent') || '12h');
+    const nextPreset = life?.disabled
+      ? 'disabled'
+      : ((life?.preset as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h');
+    setPreset(nextPreset);
     setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
+    setLabelValue(String(life?.label || ''));
     setModalOpen(true);
   };
 
@@ -180,18 +208,23 @@ function ApiKeysCardEditor({
     setFormError('');
     setPreset('12h');
     setCustomExpiresAt('');
+    setLabelValue('');
   };
 
   const updateApiKeys = (nextKeys: string[]) => {
     onChange(nextKeys.join('\n'));
   };
 
-  const handleDelete = async (index: number) => {
-    const key = apiKeys[index];
-    updateApiKeys(apiKeys.filter((_, i) => i !== index));
-    if (!key) return;
+  const handleDeleteByKey = async (key: string) => {
+    const target = String(key || '').trim();
+    if (!target) return;
+
+    if (apiKeys.includes(target)) {
+      updateApiKeys(apiKeys.filter((item) => item !== target));
+    }
+
     try {
-      await apiKeysApi.deleteLifecycleKey(key);
+      await apiKeysApi.deleteLifecycleKey(target);
       await loadLifecycle();
     } catch {
       // ignore for old backend
@@ -220,11 +253,19 @@ function ApiKeysCardEditor({
     updateApiKeys(nextKeys);
 
     try {
-      await apiKeysApi.setLifecycle({
-        key: trimmed,
-        preset,
-        expiresAt: preset === 'custom' ? new Date(customExpiresAt).toISOString() : undefined,
-      });
+      if (preset === 'disabled') {
+        await apiKeysApi.disableLifecycleKey(trimmed);
+      } else {
+        await apiKeysApi.setLifecycle({
+          key: trimmed,
+          preset,
+          expiresAt: preset === 'custom' ? new Date(customExpiresAt).toISOString() : undefined,
+          label: labelValue.trim() || undefined,
+        });
+        await apiKeysApi.enableLifecycleKey(trimmed).catch(() => {
+          // ignore if backend doesn't require explicit enable
+        });
+      }
       await loadLifecycle();
     } catch (err) {
       const message = err instanceof Error ? err.message : '设置生命周期失败';
@@ -247,37 +288,11 @@ function ApiKeysCardEditor({
     setFormError('');
   };
 
-  const handleDisable = async (key: string) => {
-    try {
-      await apiKeysApi.disableLifecycleKey(key);
-      updateApiKeys(apiKeys.filter((k) => k !== key));
-      await loadLifecycle();
-      showNotification('已禁用', 'success');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '禁用失败';
-      showNotification(message, 'error');
-    }
-  };
-
-  const handleEnable = async (key: string) => {
-    try {
-      await apiKeysApi.enableLifecycleKey(key);
-      if (!apiKeys.includes(key)) {
-        updateApiKeys([...apiKeys, key]);
-      }
-      await loadLifecycle();
-      showNotification('已启用', 'success');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '启用失败';
-      showNotification(message, 'error');
-    }
-  };
-
   const renderLifecycleText = (key: string) => {
     const life = lifecycleMap[key];
     if (!life) return '未设置有效期';
     if (life.disabled) {
-      return `已禁用${life.disabledReason ? ` · ${life.disabledReason}` : ''}`;
+      return '已禁用';
     }
     if (!life.expiresAt) return '永久';
     try {
@@ -296,7 +311,7 @@ function ApiKeysCardEditor({
         </Button>
       </div>
 
-      {apiKeys.length === 0 ? (
+      {displayKeys.length === 0 ? (
         <div
           style={{
             border: '1px dashed var(--border-color)',
@@ -310,38 +325,56 @@ function ApiKeysCardEditor({
         </div>
       ) : (
         <div className="item-list" style={{ marginTop: 4 }}>
-          {apiKeys.map((key, index) => {
+          {displayKeys.map((key, index) => {
             const life = lifecycleMap[key];
             const disabledState = Boolean(life?.disabled);
+            const statusText = disabledState ? '停用' : '正常';
+            const statusColor = disabledState ? '#ef4444' : '#22c55e';
+            const canDelete = true;
             return (
               <div key={`${key}-${index}`} className="item-row">
                 <div className="item-meta">
                   <div className="pill">#{index + 1}</div>
                   <div className="item-title">API Key</div>
                   <div className="item-subtitle">{maskApiKey(String(key || ''))}</div>
+                  {life?.label ? (
+                    <div className="item-subtitle" style={{ marginTop: 6 }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '3px 10px',
+                          borderRadius: 999,
+                          background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(16,185,129,0.22) 100%)',
+                          border: '1px solid rgba(99,102,241,0.38)',
+                          color: '#4338ca',
+                          fontWeight: 700,
+                          boxShadow: '0 2px 6px rgba(79,70,229,0.18)',
+                        }}
+                      >
+                        {life.label}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="item-subtitle" style={{ marginTop: 4 }}>
                     {lifecycleLoading ? '读取有效期中...' : renderLifecycleText(key)}
+                  </div>
+                  <div className="item-subtitle" style={{ marginTop: 6 }}>
+                    API状态：
+                    <span style={{ color: statusColor, fontWeight: 700, marginLeft: 4 }}>{statusText}</span>
                   </div>
                 </div>
                 <div className="item-actions" style={{ display: 'flex', flexWrap: 'wrap' }}>
                   <Button variant="secondary" size="sm" onClick={() => handleCopy(key)} disabled={disabled}>
                     {t('common.copy')}
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={() => openEditModal(index)} disabled={disabled}>
+                  <Button variant="secondary" size="sm" onClick={() => openEditModal(key)} disabled={disabled}>
                     {t('config_management.visual.common.edit')}
                   </Button>
-                  {disabledState ? (
-                    <Button variant="secondary" size="sm" onClick={() => handleEnable(key)} disabled={disabled}>
-                      手动启用
+                  {canDelete ? (
+                    <Button variant="danger" size="sm" onClick={() => handleDeleteByKey(key)} disabled={disabled}>
+                      手动删除
                     </Button>
-                  ) : (
-                    <Button variant="secondary" size="sm" onClick={() => handleDisable(key)} disabled={disabled}>
-                      到期禁用/手动禁用
-                    </Button>
-                  )}
-                  <Button variant="danger" size="sm" onClick={() => handleDelete(index)} disabled={disabled}>
-                    手动删除
-                  </Button>
+                  ) : null}
                 </div>
               </div>
             );
@@ -349,7 +382,7 @@ function ApiKeysCardEditor({
         </div>
       )}
 
-      <div className="hint">支持 12h / 7天 / 自定义 / 永久；到期自动禁用，可手动启用或删除。</div>
+      <div className="hint">支持 12h / 7天 / 自定义 / 永久；到期自动禁用。到期密钥仅停用，不自动删除。</div>
 
       <Modal
         open={modalOpen}
@@ -388,13 +421,24 @@ function ApiKeysCardEditor({
           }
         />
 
+        <Input
+          label="备注"
+          placeholder="例如：策略A-主账户 / 临时测试"
+          value={labelValue}
+          onChange={(e) => setLabelValue(e.target.value)}
+          disabled={disabled}
+          hint="用于区分不同 API Key"
+        />
+
         <div className="form-group" style={{ marginTop: 12 }}>
           <label>有效期</label>
           <Select
             value={preset}
             options={lifecycleOptions}
             disabled={disabled}
-            onChange={(v) => setPreset((v as '12h' | '7d' | 'custom' | 'permanent') || '12h')}
+            onChange={(v) =>
+              setPreset((v as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h')
+            }
           />
         </div>
 
