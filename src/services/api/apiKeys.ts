@@ -9,6 +9,7 @@ export interface ApiKeyLifecycleItem {
   label?: string;
   preset?: '12h' | '7d' | 'custom' | 'permanent' | string;
   expiresAt?: string;
+  models?: string[];
   disabled?: boolean;
   disabledReason?: string;
   disabledAt?: string;
@@ -39,6 +40,7 @@ export const apiKeysApi = {
     preset: '12h' | '7d' | 'custom' | 'permanent';
     expiresAt?: string;
     label?: string;
+    models?: string[];
   }) => apiClient.put('/api-keys/lifecycle', payload),
 
   disableLifecycleKey: (key: string) => apiClient.post('/api-keys/lifecycle/disable', { key }),

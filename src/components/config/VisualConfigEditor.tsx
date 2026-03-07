@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, type ReactNode } from 'react';
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -8,6 +8,7 @@ import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { ConfigSection } from '@/components/config/ConfigSection';
 import { useNotificationStore } from '@/stores';
 import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
+import { authFilesApi } from '@/services/api/authFiles';
 import styles from './VisualConfigEditor.module.scss';
 import { copyToClipboard } from '@/utils/clipboard';
 import type {
@@ -131,6 +132,10 @@ function ApiKeysCardEditor({
   const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent' | 'disabled'>('12h');
   const [customExpiresAt, setCustomExpiresAt] = useState('');
   const [labelValue, setLabelValue] = useState('');
+  const [modelInputValue, setModelInputValue] = useState('');
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   const lifecycleOptions = useMemo(
     () => [
@@ -141,6 +146,75 @@ function ApiKeysCardEditor({
       { value: 'disabled', label: '停用' },
     ],
     []
+  );
+
+  const normalizeModelValue = useCallback((value: string) => value.trim(), []);
+
+  const addModelSelection = useCallback(
+    (value: string) => {
+      const normalized = normalizeModelValue(value);
+      if (!normalized) return;
+      setSelectedModels((prev) => {
+        const exists = prev.some((item) => item.toLowerCase() === normalized.toLowerCase());
+        if (exists) return prev;
+        return [...prev, normalized];
+      });
+      setModelInputValue('');
+    },
+    [normalizeModelValue]
+  );
+
+  const removeModelSelection = useCallback((value: string) => {
+    setSelectedModels((prev) => prev.filter((item) => item !== value));
+  }, []);
+
+  const modelAutocompleteOptions = useMemo(() => {
+    const existing = new Set(selectedModels.map((item) => item.toLowerCase()));
+    return availableModels.filter((item) => !existing.has(item.toLowerCase()));
+  }, [availableModels, selectedModels]);
+
+  const resolveProviderFromLabel = useCallback((label: string): string => {
+    const lower = String(label || '').toLowerCase();
+    if (!lower) return '';
+    if (lower.includes('claude')) return 'claude';
+    if (lower.includes('codex') || lower.includes('openai')) return 'codex';
+    if (lower.includes('gemini') || lower.includes('vertex') || lower.includes('google')) return 'gemini';
+    if (lower.includes('qwen')) return 'qwen';
+    if (lower.includes('kimi') || lower.includes('moonshot')) return 'kimi';
+    if (lower.includes('iflow')) return 'iflow';
+    if (lower.includes('antigravity')) return 'antigravity';
+    if (lower.includes('aistudio')) return 'aistudio';
+    return '';
+  }, []);
+
+  const loadModelsForKey = useCallback(
+    async (label: string, key: string) => {
+      setLoadingModels(true);
+      try {
+        const provider = resolveProviderFromLabel(label);
+        const [fromProvider, fromAuth] = await Promise.all([
+          provider ? authFilesApi.getModelDefinitions(provider).catch(() => []) : Promise.resolve([]),
+          authFilesApi.getModelsForAuthFile(key).catch(() => []),
+        ]);
+
+        const merged = [...fromProvider, ...fromAuth]
+          .map((item) => String(item?.id || '').trim())
+          .filter(Boolean);
+
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        merged.forEach((item) => {
+          const token = item.toLowerCase();
+          if (seen.has(token)) return;
+          seen.add(token);
+          deduped.push(item);
+        });
+        setAvailableModels(deduped);
+      } finally {
+        setLoadingModels(false);
+      }
+    },
+    [resolveProviderFromLabel]
   );
 
   function generateSecureApiKey(): string {
@@ -181,6 +255,9 @@ function ApiKeysCardEditor({
     setPreset('12h');
     setCustomExpiresAt('');
     setLabelValue('');
+    setModelInputValue('');
+    setSelectedModels([]);
+    setAvailableModels([]);
     setModalOpen(true);
   };
 
@@ -198,7 +275,12 @@ function ApiKeysCardEditor({
     setPreset(nextPreset);
     setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
     setLabelValue(String(life?.label || ''));
+    setModelInputValue('');
+    setSelectedModels(Array.isArray(life?.models) ? life.models.filter(Boolean) : []);
     setModalOpen(true);
+    loadModelsForKey(String(life?.label || ''), target).catch(() => {
+      // noop
+    });
   };
 
   const closeModal = () => {
@@ -209,6 +291,9 @@ function ApiKeysCardEditor({
     setPreset('12h');
     setCustomExpiresAt('');
     setLabelValue('');
+    setModelInputValue('');
+    setSelectedModels([]);
+    setAvailableModels([]);
   };
 
   const updateApiKeys = (nextKeys: string[]) => {
@@ -261,6 +346,7 @@ function ApiKeysCardEditor({
           preset,
           expiresAt: preset === 'custom' ? new Date(customExpiresAt).toISOString() : undefined,
           label: labelValue.trim() || undefined,
+          models: selectedModels,
         });
         await apiKeysApi.enableLifecycleKey(trimmed).catch(() => {
           // ignore if backend doesn't require explicit enable
@@ -358,6 +444,9 @@ function ApiKeysCardEditor({
                   <div className="item-subtitle" style={{ marginTop: 4 }}>
                     {lifecycleLoading ? '读取有效期中...' : renderLifecycleText(key)}
                   </div>
+                  <div className="item-subtitle" style={{ marginTop: 4 }}>
+                    可用模型：{Array.isArray(life?.models) && life.models.length > 0 ? life.models.join(', ') : '全部'}
+                  </div>
                   <div className="item-subtitle" style={{ marginTop: 6 }}>
                     API状态：
                     <span style={{ color: statusColor, fontWeight: 700, marginLeft: 4 }}>{statusText}</span>
@@ -429,6 +518,75 @@ function ApiKeysCardEditor({
           disabled={disabled}
           hint="用于区分不同 API Key"
         />
+
+        <div className="form-group" style={{ marginTop: 12 }}>
+          <label>可用模型白名单</label>
+          <Input
+            placeholder="输入模型名后回车添加，如 gpt-4o-mini"
+            value={modelInputValue}
+            onChange={(e) => setModelInputValue(e.target.value)}
+            disabled={disabled}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addModelSelection(modelInputValue);
+              }
+            }}
+            hint={
+              loadingModels
+                ? '正在读取模型库...'
+                : modelAutocompleteOptions.length > 0
+                  ? `建议：${modelAutocompleteOptions.slice(0, 8).join(', ')}`
+                  : '留空表示不限制模型'
+            }
+            rightElement={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => addModelSelection(modelInputValue)}
+                disabled={disabled}
+              >
+                添加
+              </Button>
+            }
+          />
+          {selectedModels.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {selectedModels.map((model) => (
+                <span
+                  key={model}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-tertiary)',
+                    fontSize: 12,
+                  }}
+                >
+                  {model}
+                  <button
+                    type="button"
+                    onClick={() => removeModelSelection(model)}
+                    disabled={disabled}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--text-secondary)',
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
 
         <div className="form-group" style={{ marginTop: 12 }}>
           <label>有效期</label>
