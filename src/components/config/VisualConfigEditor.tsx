@@ -1,36 +1,54 @@
-import { useCallback, useId, type ReactNode } from 'react';
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { ConfigSection } from '@/components/config/ConfigSection';
+import { useNotificationStore } from '@/stores';
+import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
+import { authFilesApi } from '@/services/api/authFiles';
+
+const MODEL_PROVIDER_OPTIONS = [
+  { value: '', label: '自动识别' },
+  { value: 'codex', label: 'OpenAI/Codex' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'vertex', label: 'Vertex' },
+  { value: 'gemini-cli', label: 'Gemini CLI' },
+  { value: 'aistudio', label: 'AI Studio' },
+  { value: 'qwen', label: 'Qwen' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'iflow', label: 'iFlow' },
+  { value: 'antigravity', label: 'Antigravity' },
+] as const;
+
+const ALL_MODEL_PROVIDERS = MODEL_PROVIDER_OPTIONS.map((item) => item.value).filter(Boolean);
+
+
+import styles from './VisualConfigEditor.module.scss';
+import { copyToClipboard } from '@/utils/clipboard';
 import type {
   PayloadFilterRule,
-  PayloadParamValidationErrorCode,
+  PayloadModelEntry,
+  PayloadParamEntry,
+  PayloadParamValueType,
   PayloadRule,
-  VisualConfigValidationErrorCode,
-  VisualConfigValidationErrors,
   VisualConfigValues,
 } from '@/types/visualConfig';
+import { makeClientId } from '@/types/visualConfig';
 import {
-  ApiKeysCardEditor,
-  PayloadFilterRulesEditor,
-  PayloadRulesEditor,
-} from './VisualConfigEditorBlocks';
+  VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS,
+  VISUAL_CONFIG_PROTOCOL_OPTIONS,
+} from '@/hooks/useVisualConfig';
+import { maskApiKey } from '@/utils/format';
+import { isValidApiKeyCharset } from '@/utils/validation';
 
 interface VisualConfigEditorProps {
   values: VisualConfigValues;
-  validationErrors?: VisualConfigValidationErrors;
   disabled?: boolean;
   onChange: (values: Partial<VisualConfigValues>) => void;
-}
-
-function getValidationMessage(
-  t: ReturnType<typeof useTranslation>['t'],
-  errorCode?: VisualConfigValidationErrorCode | PayloadParamValidationErrorCode
-) {
-  if (!errorCode) return undefined;
-  return t(`config_management.visual.validation.${errorCode}`);
 }
 
 type ToggleRowProps = {
@@ -83,43 +101,1073 @@ function Divider() {
   return <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />;
 }
 
-export function VisualConfigEditor({ values, validationErrors, disabled = false, onChange }: VisualConfigEditorProps) {
+function ApiKeysCardEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (nextValue: string) => void;
+}) {
   const { t } = useTranslation();
-  const routingStrategyLabelId = useId();
-  const routingStrategyHintId = `${routingStrategyLabelId}-hint`;
-  const keepaliveInputId = useId();
-  const keepaliveHintId = `${keepaliveInputId}-hint`;
-  const keepaliveErrorId = `${keepaliveInputId}-error`;
-  const nonstreamKeepaliveInputId = useId();
-  const nonstreamKeepaliveHintId = `${nonstreamKeepaliveInputId}-hint`;
-  const nonstreamKeepaliveErrorId = `${nonstreamKeepaliveInputId}-error`;
+  const { showNotification } = useNotificationStore();
+  const apiKeys = useMemo(
+    () =>
+      value
+        .split('\n')
+        .map((key) => key.trim())
+        .filter(Boolean),
+    [value]
+  );
+
+  const [lifecycleMap, setLifecycleMap] = useState<Record<string, ApiKeyLifecycleItem>>({});
+  const displayKeys = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    apiKeys.forEach((key) => {
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      result.push(key);
+    });
+
+    Object.keys(lifecycleMap).forEach((key) => {
+      const trimmed = String(key || '').trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      result.push(trimmed);
+    });
+
+    return result;
+  }, [apiKeys, lifecycleMap]);
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [inputValue, setInputValue] = useState('');
+  const [formError, setFormError] = useState('');
+  const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent' | 'disabled'>('12h');
+  const [customExpiresAt, setCustomExpiresAt] = useState('');
+  const [labelValue, setLabelValue] = useState('');
+  const [modelInputValue, setModelInputValue] = useState('');
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelProvider, setModelProvider] = useState('');
+
+  const lifecycleOptions = useMemo(
+    () => [
+      { value: '12h', label: '12h' },
+      { value: '7d', label: '7天' },
+      { value: 'custom', label: '自定义' },
+      { value: 'permanent', label: '永久' },
+      { value: 'disabled', label: '停用' },
+    ],
+    []
+  );
+
+  const normalizeModelValue = useCallback((value: string) => value.trim(), []);
+
+  const addModelSelection = useCallback(
+    (value: string) => {
+      const normalized = normalizeModelValue(value);
+      if (!normalized) return;
+      setSelectedModels((prev) => {
+        const exists = prev.some((item) => item.toLowerCase() === normalized.toLowerCase());
+        if (exists) return prev;
+        return [...prev, normalized];
+      });
+      setModelInputValue('');
+    },
+    [normalizeModelValue]
+  );
+
+  const removeModelSelection = useCallback((value: string) => {
+    setSelectedModels((prev) => prev.filter((item) => item !== value));
+  }, []);
+
+  const modelAutocompleteOptions = useMemo(() => {
+    const existing = new Set(selectedModels.map((item) => item.toLowerCase()));
+    return availableModels.filter((item) => !existing.has(item.toLowerCase()));
+  }, [availableModels, selectedModels]);
+
+  const normalizeProvider = useCallback((value: string): string => {
+    const lower = String(value || '').trim().toLowerCase();
+    if (!lower) return '';
+    const matched = ALL_MODEL_PROVIDERS.find((item) => item === lower);
+    return matched || '';
+  }, []);
+
+  const resolveProviderFromLabel = useCallback(
+    (label: string): string => {
+      const lower = String(label || '').toLowerCase();
+      if (!lower) return '';
+      if (lower.includes('claude')) return 'claude';
+      if (lower.includes('codex') || lower.includes('openai') || lower.includes('gpt')) return 'codex';
+      if (lower.includes('gemini-cli')) return 'gemini-cli';
+      if (lower.includes('gemini') || lower.includes('google')) return 'gemini';
+      if (lower.includes('vertex')) return 'vertex';
+      if (lower.includes('qwen')) return 'qwen';
+      if (lower.includes('kimi') || lower.includes('moonshot')) return 'kimi';
+      if (lower.includes('iflow')) return 'iflow';
+      if (lower.includes('antigravity')) return 'antigravity';
+      if (lower.includes('aistudio')) return 'aistudio';
+      return '';
+    },
+    []
+  );
+
+  const loadModelsForKey = useCallback(
+    async (label: string, key: string, preferredProvider = '') => {
+      setLoadingModels(true);
+      try {
+        const normalizedPreferredProvider = normalizeProvider(preferredProvider);
+        const provider = normalizedPreferredProvider || resolveProviderFromLabel(label);
+
+        const fromAuth = key ? await authFilesApi.getModelsForAuthFile(key).catch(() => []) : [];
+
+        let providerModels: { id: string }[] = [];
+        if (provider) {
+          providerModels = await authFilesApi.getModelDefinitions(provider).catch(() => []);
+        }
+
+        const merged = [...fromAuth, ...providerModels]
+          .map((item) => String(item?.id || '').trim())
+          .filter(Boolean);
+
+        const deduped: string[] = [];
+        const seen = new Set<string>();
+        merged.forEach((item) => {
+          const token = item.toLowerCase();
+          if (seen.has(token)) return;
+          seen.add(token);
+          deduped.push(item);
+        });
+
+        setAvailableModels(deduped);
+      } finally {
+        setLoadingModels(false);
+      }
+    },
+    [normalizeProvider, resolveProviderFromLabel]
+  );
+
+  function generateSecureApiKey(): string {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const array = new Uint8Array(17);
+    crypto.getRandomValues(array);
+    return 'sk-' + Array.from(array, (b) => charset[b % charset.length]).join('');
+  }
+
+  const loadLifecycle = async () => {
+    setLifecycleLoading(true);
+    try {
+      const items = await apiKeysApi.listLifecycle();
+      const nextMap: Record<string, ApiKeyLifecycleItem> = {};
+      items.forEach((item) => {
+        const key = String(item.key || '').trim();
+        if (!key) return;
+        nextMap[key] = item;
+      });
+      setLifecycleMap(nextMap);
+    } catch {
+      // ignore when backend not upgraded yet
+    } finally {
+      setLifecycleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLifecycle().catch(() => {
+      // ignore
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    loadModelsForKey(labelValue, inputValue, modelProvider).catch(() => {
+      // ignore
+    });
+  }, [modalOpen, labelValue, inputValue, modelProvider, loadModelsForKey]);
+
+  const openAddModal = () => {
+    setEditingIndex(null);
+    setInputValue('');
+    setFormError('');
+    setPreset('12h');
+    setCustomExpiresAt('');
+    setLabelValue('');
+    setModelInputValue('');
+    setSelectedModels([]);
+    setAvailableModels([]);
+    setModelProvider('');
+    setModalOpen(true);
+  };
+
+  const openEditModal = (key: string) => {
+    const target = String(key || '').trim();
+    if (!target) return;
+    const index = apiKeys.findIndex((item) => item === target);
+    const life = lifecycleMap[target];
+    setEditingIndex(index >= 0 ? index : null);
+    setInputValue(target);
+    setFormError('');
+    const nextPreset = life?.disabled
+      ? 'disabled'
+      : ((life?.preset as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h');
+    setPreset(nextPreset);
+    setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
+    setLabelValue(String(life?.label || ''));
+    const initialProvider = normalizeProvider(resolveProviderFromLabel(String(life?.label || '')));
+    setModelInputValue('');
+    setSelectedModels(Array.isArray(life?.models) ? life.models.filter(Boolean) : []);
+    setModelProvider(initialProvider);
+    setModalOpen(true);
+    loadModelsForKey(String(life?.label || ''), target, initialProvider).catch(() => {
+      // noop
+    });
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setInputValue('');
+    setEditingIndex(null);
+    setFormError('');
+    setPreset('12h');
+    setCustomExpiresAt('');
+    setLabelValue('');
+    setModelInputValue('');
+    setSelectedModels([]);
+    setAvailableModels([]);
+    setModelProvider('');
+  };
+
+  const updateApiKeys = (nextKeys: string[]) => {
+    onChange(nextKeys.join('\n'));
+  };
+
+  const handleDeleteByKey = async (key: string) => {
+    const target = String(key || '').trim();
+    if (!target) return;
+
+    if (apiKeys.includes(target)) {
+      updateApiKeys(apiKeys.filter((item) => item !== target));
+    }
+
+    try {
+      await apiKeysApi.deleteLifecycleKey(target);
+      await loadLifecycle();
+    } catch {
+      // ignore for old backend
+    }
+  };
+
+  const handleSave = async () => {
+    const trimmed = inputValue.trim();
+    if (!trimmed) {
+      setFormError(t('config_management.visual.api_keys.error_empty'));
+      return;
+    }
+    if (!isValidApiKeyCharset(trimmed)) {
+      setFormError(t('config_management.visual.api_keys.error_invalid'));
+      return;
+    }
+    if (preset === 'custom' && !customExpiresAt.trim()) {
+      setFormError('自定义有效期需要选择到期时间');
+      return;
+    }
+
+    const nextKeys =
+      editingIndex === null
+        ? [...apiKeys, trimmed]
+        : apiKeys.map((key, idx) => (idx === editingIndex ? trimmed : key));
+    updateApiKeys(nextKeys);
+
+    try {
+      if (preset === 'disabled') {
+        await apiKeysApi.disableLifecycleKey(trimmed);
+      } else {
+        await apiKeysApi.setLifecycle({
+          key: trimmed,
+          preset,
+          expiresAt: preset === 'custom' ? new Date(customExpiresAt).toISOString() : undefined,
+          label: labelValue.trim() || undefined,
+          models: selectedModels,
+        });
+        await apiKeysApi.enableLifecycleKey(trimmed).catch(() => {
+          // ignore if backend doesn't require explicit enable
+        });
+      }
+      await loadLifecycle();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '设置生命周期失败';
+      showNotification(message, 'warning');
+    }
+
+    closeModal();
+  };
+
+  const handleCopy = async (apiKey: string) => {
+    const copied = await copyToClipboard(apiKey);
+    showNotification(
+      t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
+      copied ? 'success' : 'error'
+    );
+  };
+
+  const handleGenerate = () => {
+    setInputValue(generateSecureApiKey());
+    setFormError('');
+  };
+
+  const renderLifecycleText = (key: string) => {
+    const life = lifecycleMap[key];
+    if (!life) return '未设置有效期';
+    if (life.disabled) {
+      return '已禁用';
+    }
+    if (!life.expiresAt) return '永久';
+    try {
+      return `到期: ${new Date(life.expiresAt).toLocaleString()}`;
+    } catch {
+      return `到期: ${life.expiresAt}`;
+    }
+  };
+
+  return (
+    <div className="form-group" style={{ marginBottom: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <label style={{ margin: 0 }}>{t('config_management.visual.api_keys.label')}</label>
+        <Button size="sm" onClick={openAddModal} disabled={disabled}>
+          {t('config_management.visual.api_keys.add')}
+        </Button>
+      </div>
+
+      {displayKeys.length === 0 ? (
+        <div
+          style={{
+            border: '1px dashed var(--border-color)',
+            borderRadius: 12,
+            padding: 16,
+            color: 'var(--text-secondary)',
+            textAlign: 'center',
+          }}
+        >
+          {t('config_management.visual.api_keys.empty')}
+        </div>
+      ) : (
+        <div className="item-list" style={{ marginTop: 4 }}>
+          {displayKeys.map((key, index) => {
+            const life = lifecycleMap[key];
+            const disabledState = Boolean(life?.disabled);
+            const statusText = disabledState ? '停用' : '正常';
+            const statusColor = disabledState ? '#ef4444' : '#22c55e';
+            const canDelete = true;
+            return (
+              <div key={`${key}-${index}`} className="item-row">
+                <div className="item-meta">
+                  <div className="pill">#{index + 1}</div>
+                  <div className="item-title">API Key</div>
+                  <div className="item-subtitle">{maskApiKey(String(key || ''))}</div>
+                  {life?.label ? (
+                    <div className="item-subtitle" style={{ marginTop: 6 }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '3px 10px',
+                          borderRadius: 999,
+                          background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(16,185,129,0.22) 100%)',
+                          border: '1px solid rgba(99,102,241,0.38)',
+                          color: '#4338ca',
+                          fontWeight: 700,
+                          boxShadow: '0 2px 6px rgba(79,70,229,0.18)',
+                        }}
+                      >
+                        {life.label}
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="item-subtitle" style={{ marginTop: 4 }}>
+                    {lifecycleLoading ? '读取有效期中...' : renderLifecycleText(key)}
+                  </div>
+                  <div className="item-subtitle" style={{ marginTop: 4 }}>
+                    可用模型：{Array.isArray(life?.models) && life.models.length > 0 ? life.models.join(', ') : '全部'}
+                  </div>
+                  <div className="item-subtitle" style={{ marginTop: 6 }}>
+                    API状态：
+                    <span style={{ color: statusColor, fontWeight: 700, marginLeft: 4 }}>{statusText}</span>
+                  </div>
+                </div>
+                <div className="item-actions" style={{ display: 'flex', flexWrap: 'wrap' }}>
+                  <Button variant="secondary" size="sm" onClick={() => handleCopy(key)} disabled={disabled}>
+                    {t('common.copy')}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => openEditModal(key)} disabled={disabled}>
+                    {t('config_management.visual.common.edit')}
+                  </Button>
+                  {canDelete ? (
+                    <Button variant="danger" size="sm" onClick={() => handleDeleteByKey(key)} disabled={disabled}>
+                      手动删除
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="hint">支持 12h / 7天 / 自定义 / 永久；到期自动禁用。到期密钥仅停用，不自动删除。</div>
+
+      <Modal
+        open={modalOpen}
+        onClose={closeModal}
+        title={editingIndex !== null ? t('config_management.visual.api_keys.edit_title') : t('config_management.visual.api_keys.add_title')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeModal} disabled={disabled}>
+              {t('config_management.visual.common.cancel')}
+            </Button>
+            <Button onClick={handleSave} disabled={disabled}>
+              {editingIndex !== null ? t('config_management.visual.common.update') : t('config_management.visual.common.add')}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label={t('config_management.visual.api_keys.input_label')}
+          placeholder={t('config_management.visual.api_keys.input_placeholder')}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          disabled={disabled}
+          error={formError || undefined}
+          hint={t('config_management.visual.api_keys.input_hint')}
+          style={{ paddingRight: 148 }}
+          rightElement={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerate}
+              disabled={disabled}
+            >
+              {t('config_management.visual.api_keys.generate')}
+            </Button>
+          }
+        />
+
+        <Input
+          label="备注"
+          placeholder="例如：策略A-主账户 / 临时测试"
+          value={labelValue}
+          onChange={(e) => setLabelValue(e.target.value)}
+          disabled={disabled}
+          hint="用于区分不同 API Key"
+        />
+
+        <div className="form-group" style={{ marginTop: 12 }}>
+          <label>可用模型白名单</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ minWidth: 170, flex: '0 0 170px' }}>
+              <Select
+                value={modelProvider}
+                options={MODEL_PROVIDER_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                disabled={disabled}
+                ariaLabel="模型来源"
+                onChange={(nextValue) => setModelProvider(normalizeProvider(nextValue || ''))}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                loadModelsForKey(labelValue, inputValue, modelProvider).catch(() => {
+                  // ignore
+                });
+              }}
+              disabled={disabled || loadingModels}
+            >
+              {loadingModels ? '读取中...' : '刷新模型库'}
+            </Button>
+          </div>
+
+          <Input
+            placeholder="输入模型名后回车添加，如 gpt-4o-mini"
+            value={modelInputValue}
+            onChange={(e) => setModelInputValue(e.target.value)}
+            disabled={disabled}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addModelSelection(modelInputValue);
+              }
+            }}
+            hint={
+              loadingModels
+                ? '正在读取模型库...'
+                : modelAutocompleteOptions.length > 0
+                  ? `建议：${modelAutocompleteOptions.slice(0, 8).join(', ')}`
+                  : '未读取到候选模型，可手动输入；留空表示不限制模型'
+            }
+            rightElement={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => addModelSelection(modelInputValue)}
+                disabled={disabled}
+              >
+                添加
+              </Button>
+            }
+          />
+          {modelAutocompleteOptions.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {modelAutocompleteOptions.slice(0, 20).map((model) => (
+                <button
+                  key={`suggest-${model}`}
+                  type="button"
+                  onClick={() => addModelSelection(model)}
+                  disabled={disabled}
+                  style={{
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 999,
+                    padding: '2px 10px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  + {model}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedModels.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {selectedModels.map((model) => (
+                <span
+                  key={model}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-tertiary)',
+                    fontSize: 12,
+                  }}
+                >
+                  {model}
+                  <button
+                    type="button"
+                    onClick={() => removeModelSelection(model)}
+                    disabled={disabled}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--text-secondary)',
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="form-group" style={{ marginTop: 12 }}>
+          <label>有效期</label>
+          <Select
+            value={preset}
+            options={lifecycleOptions}
+            disabled={disabled}
+            onChange={(v) =>
+              setPreset((v as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h')
+            }
+          />
+        </div>
+
+        {preset === 'custom' && (
+          <Input
+            label="自定义到期时间"
+            type="datetime-local"
+            value={customExpiresAt}
+            onChange={(e) => setCustomExpiresAt(e.target.value)}
+            disabled={disabled}
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+function StringListEditor({
+  value,
+  disabled,
+  placeholder,
+  onChange,
+}: {
+  value: string[];
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (next: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const items = value.length ? value : [];
+
+  const updateItem = (index: number, nextValue: string) =>
+    onChange(items.map((item, i) => (i === index ? nextValue : item)));
+  const addItem = () => onChange([...items, '']);
+  const removeItem = (index: number) => onChange(items.filter((_, i) => i !== index));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {items.map((item, index) => (
+        <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            className="input"
+            placeholder={placeholder}
+            value={item}
+            onChange={(e) => updateItem(index, e.target.value)}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <Button variant="ghost" size="sm" onClick={() => removeItem(index)} disabled={disabled}>
+            {t('config_management.visual.common.delete')}
+          </Button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="secondary" size="sm" onClick={addItem} disabled={disabled}>
+          {t('config_management.visual.common.add')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PayloadRulesEditor({
+  value,
+  disabled,
+  protocolFirst = false,
+  onChange,
+}: {
+  value: PayloadRule[];
+  disabled?: boolean;
+  protocolFirst?: boolean;
+  onChange: (next: PayloadRule[]) => void;
+}) {
+  const { t } = useTranslation();
+  const rules = value.length ? value : [];
+  const protocolOptions = useMemo(
+    () =>
+      VISUAL_CONFIG_PROTOCOL_OPTIONS.map((option) => ({
+        value: option.value,
+        label: t(option.labelKey, { defaultValue: option.defaultLabel }),
+      })),
+    [t]
+  );
+  const payloadValueTypeOptions = useMemo(
+    () =>
+      VISUAL_CONFIG_PAYLOAD_VALUE_TYPE_OPTIONS.map((option) => ({
+        value: option.value,
+        label: t(option.labelKey, { defaultValue: option.defaultLabel }),
+      })),
+    [t]
+  );
+
+  const addRule = () => onChange([...rules, { id: makeClientId(), models: [], params: [] }]);
+  const removeRule = (ruleIndex: number) => onChange(rules.filter((_, i) => i !== ruleIndex));
+
+  const updateRule = (ruleIndex: number, patch: Partial<PayloadRule>) =>
+    onChange(rules.map((rule, i) => (i === ruleIndex ? { ...rule, ...patch } : rule)));
+
+  const addModel = (ruleIndex: number) => {
+    const rule = rules[ruleIndex];
+    const nextModel: PayloadModelEntry = { id: makeClientId(), name: '', protocol: undefined };
+    updateRule(ruleIndex, { models: [...rule.models, nextModel] });
+  };
+
+  const removeModel = (ruleIndex: number, modelIndex: number) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, { models: rule.models.filter((_, i) => i !== modelIndex) });
+  };
+
+  const updateModel = (ruleIndex: number, modelIndex: number, patch: Partial<PayloadModelEntry>) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, {
+      models: rule.models.map((m, i) => (i === modelIndex ? { ...m, ...patch } : m)),
+    });
+  };
+
+  const addParam = (ruleIndex: number) => {
+    const rule = rules[ruleIndex];
+    const nextParam: PayloadParamEntry = {
+      id: makeClientId(),
+      path: '',
+      valueType: 'string',
+      value: '',
+    };
+    updateRule(ruleIndex, { params: [...rule.params, nextParam] });
+  };
+
+  const removeParam = (ruleIndex: number, paramIndex: number) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, { params: rule.params.filter((_, i) => i !== paramIndex) });
+  };
+
+  const updateParam = (ruleIndex: number, paramIndex: number, patch: Partial<PayloadParamEntry>) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, {
+      params: rule.params.map((p, i) => (i === paramIndex ? { ...p, ...patch } : p)),
+    });
+  };
+
+  const getValuePlaceholder = (valueType: PayloadParamValueType) => {
+    switch (valueType) {
+      case 'string':
+        return t('config_management.visual.payload_rules.value_string');
+      case 'number':
+        return t('config_management.visual.payload_rules.value_number');
+      case 'boolean':
+        return t('config_management.visual.payload_rules.value_boolean');
+      case 'json':
+        return t('config_management.visual.payload_rules.value_json');
+      default:
+        return t('config_management.visual.payload_rules.value_default');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rules.map((rule, ruleIndex) => (
+        <div
+          key={rule.id}
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: 12,
+            padding: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{t('config_management.visual.payload_rules.rule')} {ruleIndex + 1}</div>
+            <Button variant="ghost" size="sm" onClick={() => removeRule(ruleIndex)} disabled={disabled}>
+              {t('config_management.visual.common.delete')}
+            </Button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t('config_management.visual.payload_rules.models')}</div>
+            {(rule.models.length ? rule.models : []).map((model, modelIndex) => (
+              <div
+                key={model.id}
+                className={[styles.payloadRuleModelRow, protocolFirst ? styles.payloadRuleModelRowProtocolFirst : '']
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {protocolFirst ? (
+                  <>
+                    <Select
+                      value={model.protocol ?? ''}
+                      options={protocolOptions}
+                      disabled={disabled}
+                      ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                      onChange={(nextValue) =>
+                        updateModel(ruleIndex, modelIndex, {
+                          protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
+                        })
+                      }
+                    />
+                    <input
+                      className="input"
+                      placeholder={t('config_management.visual.payload_rules.model_name')}
+                      value={model.name}
+                      onChange={(e) => updateModel(ruleIndex, modelIndex, { name: e.target.value })}
+                      disabled={disabled}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      className="input"
+                      placeholder={t('config_management.visual.payload_rules.model_name')}
+                      value={model.name}
+                      onChange={(e) => updateModel(ruleIndex, modelIndex, { name: e.target.value })}
+                      disabled={disabled}
+                    />
+                    <Select
+                      value={model.protocol ?? ''}
+                      options={protocolOptions}
+                      disabled={disabled}
+                      ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                      onChange={(nextValue) =>
+                        updateModel(ruleIndex, modelIndex, {
+                          protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
+                        })
+                      }
+                    />
+                  </>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={styles.payloadRowActionButton}
+                  onClick={() => removeModel(ruleIndex, modelIndex)}
+                  disabled={disabled}
+                >
+                  {t('config_management.visual.common.delete')}
+                </Button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="sm" onClick={() => addModel(ruleIndex)} disabled={disabled}>
+                {t('config_management.visual.payload_rules.add_model')}
+              </Button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t('config_management.visual.payload_rules.params')}</div>
+            {(rule.params.length ? rule.params : []).map((param, paramIndex) => (
+              <div key={param.id} className={styles.payloadRuleParamRow}>
+                <input
+                  className="input"
+                  placeholder={t('config_management.visual.payload_rules.json_path')}
+                  value={param.path}
+                  onChange={(e) => updateParam(ruleIndex, paramIndex, { path: e.target.value })}
+                  disabled={disabled}
+                />
+                <Select
+                  value={param.valueType}
+                  options={payloadValueTypeOptions}
+                  disabled={disabled}
+                  ariaLabel={t('config_management.visual.payload_rules.param_type')}
+                  onChange={(nextValue) =>
+                    updateParam(ruleIndex, paramIndex, { valueType: nextValue as PayloadParamValueType })
+                  }
+                />
+                <input
+                  className="input"
+                  placeholder={getValuePlaceholder(param.valueType)}
+                  value={param.value}
+                  onChange={(e) => updateParam(ruleIndex, paramIndex, { value: e.target.value })}
+                  disabled={disabled}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={styles.payloadRowActionButton}
+                  onClick={() => removeParam(ruleIndex, paramIndex)}
+                  disabled={disabled}
+                >
+                  {t('config_management.visual.common.delete')}
+                </Button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="sm" onClick={() => addParam(ruleIndex)} disabled={disabled}>
+                {t('config_management.visual.payload_rules.add_param')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {rules.length === 0 && (
+        <div
+          style={{
+            border: '1px dashed var(--border-color)',
+            borderRadius: 12,
+            padding: 16,
+            color: 'var(--text-secondary)',
+            textAlign: 'center',
+          }}
+        >
+          {t('config_management.visual.payload_rules.no_rules')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="secondary" size="sm" onClick={addRule} disabled={disabled}>
+          {t('config_management.visual.payload_rules.add_rule')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PayloadFilterRulesEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: PayloadFilterRule[];
+  disabled?: boolean;
+  onChange: (next: PayloadFilterRule[]) => void;
+}) {
+  const { t } = useTranslation();
+  const rules = value.length ? value : [];
+  const protocolOptions = useMemo(
+    () =>
+      VISUAL_CONFIG_PROTOCOL_OPTIONS.map((option) => ({
+        value: option.value,
+        label: t(option.labelKey, { defaultValue: option.defaultLabel }),
+      })),
+    [t]
+  );
+
+  const addRule = () => onChange([...rules, { id: makeClientId(), models: [], params: [] }]);
+  const removeRule = (ruleIndex: number) => onChange(rules.filter((_, i) => i !== ruleIndex));
+
+  const updateRule = (ruleIndex: number, patch: Partial<PayloadFilterRule>) =>
+    onChange(rules.map((rule, i) => (i === ruleIndex ? { ...rule, ...patch } : rule)));
+
+  const addModel = (ruleIndex: number) => {
+    const rule = rules[ruleIndex];
+    const nextModel: PayloadModelEntry = { id: makeClientId(), name: '', protocol: undefined };
+    updateRule(ruleIndex, { models: [...rule.models, nextModel] });
+  };
+
+  const removeModel = (ruleIndex: number, modelIndex: number) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, { models: rule.models.filter((_, i) => i !== modelIndex) });
+  };
+
+  const updateModel = (ruleIndex: number, modelIndex: number, patch: Partial<PayloadModelEntry>) => {
+    const rule = rules[ruleIndex];
+    updateRule(ruleIndex, {
+      models: rule.models.map((m, i) => (i === modelIndex ? { ...m, ...patch } : m)),
+    });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rules.map((rule, ruleIndex) => (
+        <div
+          key={rule.id}
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: 12,
+            padding: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{t('config_management.visual.payload_rules.rule')} {ruleIndex + 1}</div>
+            <Button variant="ghost" size="sm" onClick={() => removeRule(ruleIndex)} disabled={disabled}>
+              {t('config_management.visual.common.delete')}
+            </Button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t('config_management.visual.payload_rules.models')}</div>
+            {rule.models.map((model, modelIndex) => (
+              <div key={model.id} className={styles.payloadFilterModelRow}>
+                <input
+                  className="input"
+                  placeholder={t('config_management.visual.payload_rules.model_name')}
+                  value={model.name}
+                  onChange={(e) => updateModel(ruleIndex, modelIndex, { name: e.target.value })}
+                  disabled={disabled}
+                />
+                <Select
+                  value={model.protocol ?? ''}
+                  options={protocolOptions}
+                  disabled={disabled}
+                  ariaLabel={t('config_management.visual.payload_rules.provider_type')}
+                  onChange={(nextValue) =>
+                    updateModel(ruleIndex, modelIndex, {
+                      protocol: (nextValue || undefined) as PayloadModelEntry['protocol'],
+                    })
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={styles.payloadRowActionButton}
+                  onClick={() => removeModel(ruleIndex, modelIndex)}
+                  disabled={disabled}
+                >
+                  {t('config_management.visual.common.delete')}
+                </Button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="sm" onClick={() => addModel(ruleIndex)} disabled={disabled}>
+                {t('config_management.visual.payload_rules.add_model')}
+              </Button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t('config_management.visual.payload_rules.remove_params')}</div>
+            <StringListEditor
+              value={rule.params}
+              disabled={disabled}
+              placeholder={t('config_management.visual.payload_rules.json_path_filter')}
+              onChange={(params) => updateRule(ruleIndex, { params })}
+            />
+          </div>
+        </div>
+      ))}
+
+      {rules.length === 0 && (
+        <div
+          style={{
+            border: '1px dashed var(--border-color)',
+            borderRadius: 12,
+            padding: 16,
+            color: 'var(--text-secondary)',
+            textAlign: 'center',
+          }}
+        >
+          {t('config_management.visual.payload_rules.no_rules')}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="secondary" size="sm" onClick={addRule} disabled={disabled}>
+          {t('config_management.visual.payload_rules.add_rule')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function VisualConfigEditor({ values, disabled = false, onChange }: VisualConfigEditorProps) {
+  const { t } = useTranslation();
   const isKeepaliveDisabled = values.streaming.keepaliveSeconds === '' || values.streaming.keepaliveSeconds === '0';
   const isNonstreamKeepaliveDisabled =
     values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0';
-  const portError = getValidationMessage(t, validationErrors?.port);
-  const logsMaxSizeError = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb);
-  const requestRetryError = getValidationMessage(t, validationErrors?.requestRetry);
-  const maxRetryIntervalError = getValidationMessage(t, validationErrors?.maxRetryInterval);
-  const keepaliveError = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds']);
-  const bootstrapRetriesError = getValidationMessage(t, validationErrors?.['streaming.bootstrapRetries']);
-  const nonstreamKeepaliveError = getValidationMessage(
-    t,
-    validationErrors?.['streaming.nonstreamKeepaliveInterval']
-  );
-
-  const handleApiKeysTextChange = useCallback((apiKeysText: string) => onChange({ apiKeysText }), [onChange]);
-  const handlePayloadDefaultRulesChange = useCallback(
-    (payloadDefaultRules: PayloadRule[]) => onChange({ payloadDefaultRules }),
-    [onChange]
-  );
-  const handlePayloadOverrideRulesChange = useCallback(
-    (payloadOverrideRules: PayloadRule[]) => onChange({ payloadOverrideRules }),
-    [onChange]
-  );
-  const handlePayloadFilterRulesChange = useCallback(
-    (payloadFilterRules: PayloadFilterRule[]) => onChange({ payloadFilterRules }),
-    [onChange]
-  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -139,7 +1187,6 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
             value={values.port}
             onChange={(e) => onChange({ port: e.target.value })}
             disabled={disabled}
-            error={portError}
           />
         </SectionGrid>
       </ConfigSection>
@@ -226,7 +1273,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
           <ApiKeysCardEditor
             value={values.apiKeysText}
             disabled={disabled}
-            onChange={handleApiKeysTextChange}
+            onChange={(apiKeysText) => onChange({ apiKeysText })}
           />
         </div>
       </ConfigSection>
@@ -272,7 +1319,6 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               value={values.logsMaxTotalSizeMb}
               onChange={(e) => onChange({ logsMaxTotalSizeMb: e.target.value })}
               disabled={disabled}
-              error={logsMaxSizeError}
             />
           </SectionGrid>
         </div>
@@ -295,7 +1341,6 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               value={values.requestRetry}
               onChange={(e) => onChange({ requestRetry: e.target.value })}
               disabled={disabled}
-              error={requestRetryError}
             />
             <Input
               label={t('config_management.visual.sections.network.max_retry_interval')}
@@ -304,25 +1349,22 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               value={values.maxRetryInterval}
               onChange={(e) => onChange({ maxRetryInterval: e.target.value })}
               disabled={disabled}
-              error={maxRetryIntervalError}
             />
             <div className="form-group">
-              <label id={routingStrategyLabelId} htmlFor={`${routingStrategyLabelId}-select`}>{t('config_management.visual.sections.network.routing_strategy')}</label>
+              <label>{t('config_management.visual.sections.network.routing_strategy')}</label>
               <Select
                 value={values.routingStrategy}
                 options={[
                   { value: 'round-robin', label: t('config_management.visual.sections.network.strategy_round_robin') },
                   { value: 'fill-first', label: t('config_management.visual.sections.network.strategy_fill_first') },
                 ]}
-                id={`${routingStrategyLabelId}-select`}
                 disabled={disabled}
-                ariaLabelledBy={routingStrategyLabelId}
-                ariaDescribedBy={routingStrategyHintId}
+                ariaLabel={t('config_management.visual.sections.network.routing_strategy')}
                 onChange={(nextValue) =>
                   onChange({ routingStrategy: nextValue as VisualConfigValues['routingStrategy'] })
                 }
               />
-              <div id={routingStrategyHintId} className="hint">{t('config_management.visual.sections.network.routing_strategy_hint')}</div>
+              <div className="hint">{t('config_management.visual.sections.network.routing_strategy_hint')}</div>
             </div>
           </SectionGrid>
 
@@ -366,10 +1408,9 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <SectionGrid>
             <div className="form-group">
-              <label htmlFor={keepaliveInputId}>{t('config_management.visual.sections.streaming.keepalive_seconds')}</label>
+              <label>{t('config_management.visual.sections.streaming.keepalive_seconds')}</label>
               <div style={{ position: 'relative' }}>
                 <input
-                  id={keepaliveInputId}
                   className="input"
                   type="number"
                   placeholder="0"
@@ -398,8 +1439,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
                   </span>
                 )}
               </div>
-              {keepaliveError && <div id={keepaliveErrorId} className="error-box">{keepaliveError}</div>}
-              <div id={keepaliveHintId} className="hint">{t('config_management.visual.sections.streaming.keepalive_hint')}</div>
+              <div className="hint">{t('config_management.visual.sections.streaming.keepalive_hint')}</div>
             </div>
             <Input
               label={t('config_management.visual.sections.streaming.bootstrap_retries')}
@@ -409,13 +1449,12 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               onChange={(e) => onChange({ streaming: { ...values.streaming, bootstrapRetries: e.target.value } })}
               disabled={disabled}
               hint={t('config_management.visual.sections.streaming.bootstrap_hint')}
-              error={bootstrapRetriesError}
             />
           </SectionGrid>
 
           <SectionGrid>
             <div className="form-group">
-              <label htmlFor={nonstreamKeepaliveInputId}>{t('config_management.visual.sections.streaming.nonstream_keepalive')}</label>
+              <label>{t('config_management.visual.sections.streaming.nonstream_keepalive')}</label>
               <div style={{ position: 'relative' }}>
                 <input
                   className="input"
@@ -448,8 +1487,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
                   </span>
                 )}
               </div>
-              {nonstreamKeepaliveError && <div id={nonstreamKeepaliveErrorId} className="error-box">{nonstreamKeepaliveError}</div>}
-              <div id={nonstreamKeepaliveHintId} className="hint">
+              <div className="hint">
                 {t('config_management.visual.sections.streaming.nonstream_keepalive_hint')}
               </div>
             </div>
@@ -467,7 +1505,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
             <PayloadRulesEditor
               value={values.payloadDefaultRules}
               disabled={disabled}
-              onChange={handlePayloadDefaultRulesChange}
+              onChange={(payloadDefaultRules) => onChange({ payloadDefaultRules })}
             />
           </div>
 
@@ -480,7 +1518,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               value={values.payloadOverrideRules}
               disabled={disabled}
               protocolFirst
-              onChange={handlePayloadOverrideRulesChange}
+              onChange={(payloadOverrideRules) => onChange({ payloadOverrideRules })}
             />
           </div>
 
@@ -492,7 +1530,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
             <PayloadFilterRulesEditor
               value={values.payloadFilterRules}
               disabled={disabled}
-              onChange={handlePayloadFilterRulesChange}
+              onChange={(payloadFilterRules) => onChange({ payloadFilterRules })}
             />
           </div>
         </div>
