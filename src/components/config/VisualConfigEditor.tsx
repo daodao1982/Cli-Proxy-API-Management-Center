@@ -192,12 +192,13 @@ function ApiKeysCardEditor({
       setLoadingModels(true);
       try {
         const provider = resolveProviderFromLabel(label);
-        const [fromProvider, fromAuth] = await Promise.all([
+        const [fromAllStatic, fromProvider, fromAuth] = await Promise.all([
+          authFilesApi.getAllModelDefinitions().catch(() => []),
           provider ? authFilesApi.getModelDefinitions(provider).catch(() => []) : Promise.resolve([]),
-          authFilesApi.getModelsForAuthFile(key).catch(() => []),
+          key ? authFilesApi.getModelsForAuthFile(key).catch(() => []) : Promise.resolve([]),
         ]);
 
-        const merged = [...fromProvider, ...fromAuth]
+        const merged = [...fromAllStatic, ...fromProvider, ...fromAuth]
           .map((item) => String(item?.id || '').trim())
           .filter(Boolean);
 
@@ -247,6 +248,13 @@ function ApiKeysCardEditor({
       // ignore
     });
   }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    loadModelsForKey(labelValue, inputValue).catch(() => {
+      // ignore
+    });
+  }, [modalOpen, labelValue, inputValue, loadModelsForKey]);
 
   const openAddModal = () => {
     setEditingIndex(null);

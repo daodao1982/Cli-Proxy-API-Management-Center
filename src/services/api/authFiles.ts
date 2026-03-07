@@ -191,5 +191,14 @@ export const authFilesApi = {
     return Array.isArray(models)
       ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
       : [];
+  },
+
+  // 获取全量静态模型定义（跨 channel 聚合）
+  async getAllModelDefinitions(): Promise<{ id: string; display_name?: string; type?: string; owned_by?: string }[]> {
+    const data = await apiClient.get<Record<string, unknown>>('/model-definitions');
+    const models = data.models ?? data['models'];
+    return Array.isArray(models)
+      ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
+      : [];
   }
 };
