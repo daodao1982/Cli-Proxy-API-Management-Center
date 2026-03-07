@@ -9,6 +9,39 @@ import { ConfigSection } from '@/components/config/ConfigSection';
 import { useNotificationStore } from '@/stores';
 import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
 import { authFilesApi } from '@/services/api/authFiles';
+
+const MODEL_PROVIDER_OPTIONS = [
+  { value: '', label: '自动识别' },
+  { value: 'codex', label: 'OpenAI/Codex' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'vertex', label: 'Vertex' },
+  { value: 'gemini-cli', label: 'Gemini CLI' },
+  { value: 'aistudio', label: 'AI Studio' },
+  { value: 'qwen', label: 'Qwen' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'iflow', label: 'iFlow' },
+  { value: 'antigravity', label: 'Antigravity' },
+] as const;
+
+const ALL_MODEL_PROVIDERS = MODEL_PROVIDER_OPTIONS.map((item) => item.value).filter(Boolean);
+
+const FALLBACK_MODEL_LIBRARY = [
+  'gpt-4o-mini',
+  'gpt-4.1-mini',
+  'gpt-4.1',
+  'o3-mini',
+  'claude-3-5-haiku-20241022',
+  'claude-3-5-sonnet-20241022',
+  'claude-3-7-sonnet-20250219',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash-lite',
+  'qwen-plus',
+  'qwen-max',
+  'kimi-k2',
+  'kimi-latest',
+];
 import styles from './VisualConfigEditor.module.scss';
 import { copyToClipboard } from '@/utils/clipboard';
 import type {
@@ -136,6 +169,7 @@ function ApiKeysCardEditor({
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [modelProvider, setModelProvider] = useState('');
 
   const lifecycleOptions = useMemo(
     () => [
@@ -173,32 +207,49 @@ function ApiKeysCardEditor({
     return availableModels.filter((item) => !existing.has(item.toLowerCase()));
   }, [availableModels, selectedModels]);
 
-  const resolveProviderFromLabel = useCallback((label: string): string => {
-    const lower = String(label || '').toLowerCase();
+  const normalizeProvider = useCallback((value: string): string => {
+    const lower = String(value || '').trim().toLowerCase();
     if (!lower) return '';
-    if (lower.includes('claude')) return 'claude';
-    if (lower.includes('codex') || lower.includes('openai')) return 'codex';
-    if (lower.includes('gemini') || lower.includes('vertex') || lower.includes('google')) return 'gemini';
-    if (lower.includes('qwen')) return 'qwen';
-    if (lower.includes('kimi') || lower.includes('moonshot')) return 'kimi';
-    if (lower.includes('iflow')) return 'iflow';
-    if (lower.includes('antigravity')) return 'antigravity';
-    if (lower.includes('aistudio')) return 'aistudio';
-    return '';
+    const matched = ALL_MODEL_PROVIDERS.find((item) => item === lower);
+    return matched || '';
   }, []);
 
+  const resolveProviderFromLabel = useCallback(
+    (label: string): string => {
+      const lower = String(label || '').toLowerCase();
+      if (!lower) return '';
+      if (lower.includes('claude')) return 'claude';
+      if (lower.includes('codex') || lower.includes('openai') || lower.includes('gpt')) return 'codex';
+      if (lower.includes('gemini-cli')) return 'gemini-cli';
+      if (lower.includes('gemini') || lower.includes('google')) return 'gemini';
+      if (lower.includes('vertex')) return 'vertex';
+      if (lower.includes('qwen')) return 'qwen';
+      if (lower.includes('kimi') || lower.includes('moonshot')) return 'kimi';
+      if (lower.includes('iflow')) return 'iflow';
+      if (lower.includes('antigravity')) return 'antigravity';
+      if (lower.includes('aistudio')) return 'aistudio';
+      return '';
+    },
+    []
+  );
+
   const loadModelsForKey = useCallback(
-    async (label: string, key: string) => {
+    async (label: string, key: string, preferredProvider = '') => {
       setLoadingModels(true);
       try {
-        const provider = resolveProviderFromLabel(label);
-        const [fromAllStatic, fromProvider, fromAuth] = await Promise.all([
+        const normalizedPreferredProvider = normalizeProvider(preferredProvider);
+        const provider = normalizedPreferredProvider || resolveProviderFromLabel(label);
+        const providerRequests = provider
+          ? [authFilesApi.getModelDefinitions(provider).catch(() => [])]
+          : ALL_MODEL_PROVIDERS.map((item) => authFilesApi.getModelDefinitions(item).catch(() => []));
+
+        const [fromAllStatic, fromAuth, ...providerLists] = await Promise.all([
           authFilesApi.getAllModelDefinitions().catch(() => []),
-          provider ? authFilesApi.getModelDefinitions(provider).catch(() => []) : Promise.resolve([]),
           key ? authFilesApi.getModelsForAuthFile(key).catch(() => []) : Promise.resolve([]),
+          ...providerRequests,
         ]);
 
-        const merged = [...fromAllStatic, ...fromProvider, ...fromAuth]
+        const merged = [...fromAllStatic, ...providerLists.flat(), ...fromAuth]
           .map((item) => String(item?.id || '').trim())
           .filter(Boolean);
 
@@ -210,12 +261,13 @@ function ApiKeysCardEditor({
           seen.add(token);
           deduped.push(item);
         });
-        setAvailableModels(deduped);
+
+        setAvailableModels(deduped.length > 0 ? deduped : FALLBACK_MODEL_LIBRARY);
       } finally {
         setLoadingModels(false);
       }
     },
-    [resolveProviderFromLabel]
+    [normalizeProvider, resolveProviderFromLabel]
   );
 
   function generateSecureApiKey(): string {
@@ -251,10 +303,10 @@ function ApiKeysCardEditor({
 
   useEffect(() => {
     if (!modalOpen) return;
-    loadModelsForKey(labelValue, inputValue).catch(() => {
+    loadModelsForKey(labelValue, inputValue, modelProvider).catch(() => {
       // ignore
     });
-  }, [modalOpen, labelValue, inputValue, loadModelsForKey]);
+  }, [modalOpen, labelValue, inputValue, modelProvider, loadModelsForKey]);
 
   const openAddModal = () => {
     setEditingIndex(null);
@@ -266,6 +318,7 @@ function ApiKeysCardEditor({
     setModelInputValue('');
     setSelectedModels([]);
     setAvailableModels([]);
+    setModelProvider('');
     setModalOpen(true);
   };
 
@@ -283,10 +336,12 @@ function ApiKeysCardEditor({
     setPreset(nextPreset);
     setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
     setLabelValue(String(life?.label || ''));
+    const initialProvider = normalizeProvider(resolveProviderFromLabel(String(life?.label || '')));
     setModelInputValue('');
     setSelectedModels(Array.isArray(life?.models) ? life.models.filter(Boolean) : []);
+    setModelProvider(initialProvider);
     setModalOpen(true);
-    loadModelsForKey(String(life?.label || ''), target).catch(() => {
+    loadModelsForKey(String(life?.label || ''), target, initialProvider).catch(() => {
       // noop
     });
   };
@@ -302,6 +357,7 @@ function ApiKeysCardEditor({
     setModelInputValue('');
     setSelectedModels([]);
     setAvailableModels([]);
+    setModelProvider('');
   };
 
   const updateApiKeys = (nextKeys: string[]) => {
@@ -529,6 +585,31 @@ function ApiKeysCardEditor({
 
         <div className="form-group" style={{ marginTop: 12 }}>
           <label>可用模型白名单</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ minWidth: 170, flex: '0 0 170px' }}>
+              <Select
+                value={modelProvider}
+                options={MODEL_PROVIDER_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                disabled={disabled}
+                ariaLabel="模型来源"
+                onChange={(nextValue) => setModelProvider(normalizeProvider(nextValue || ''))}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                loadModelsForKey(labelValue, inputValue, modelProvider).catch(() => {
+                  // ignore
+                });
+              }}
+              disabled={disabled || loadingModels}
+            >
+              {loadingModels ? '读取中...' : '刷新模型库'}
+            </Button>
+          </div>
+
           <Input
             placeholder="输入模型名后回车添加，如 gpt-4o-mini"
             value={modelInputValue}
@@ -545,7 +626,7 @@ function ApiKeysCardEditor({
                 ? '正在读取模型库...'
                 : modelAutocompleteOptions.length > 0
                   ? `建议：${modelAutocompleteOptions.slice(0, 8).join(', ')}`
-                  : '留空表示不限制模型'
+                  : '未读取到候选模型，可手动输入；留空表示不限制模型'
             }
             rightElement={
               <Button
