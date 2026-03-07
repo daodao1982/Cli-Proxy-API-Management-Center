@@ -559,6 +559,29 @@ function ApiKeysCardEditor({
               </Button>
             }
           />
+          {modelAutocompleteOptions.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {modelAutocompleteOptions.slice(0, 20).map((model) => (
+                <button
+                  key={`suggest-${model}`}
+                  type="button"
+                  onClick={() => addModelSelection(model)}
+                  disabled={disabled}
+                  style={{
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 999,
+                    padding: '2px 10px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  + {model}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {selectedModels.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
               {selectedModels.map((model) => (
