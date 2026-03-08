@@ -26,22 +26,7 @@ const MODEL_PROVIDER_OPTIONS = [
 
 const ALL_MODEL_PROVIDERS = MODEL_PROVIDER_OPTIONS.map((item) => item.value).filter(Boolean);
 
-const FALLBACK_MODEL_LIBRARY = [
-  'gpt-4o-mini',
-  'gpt-4.1-mini',
-  'gpt-4.1',
-  'o3-mini',
-  'claude-3-5-haiku-20241022',
-  'claude-3-5-sonnet-20241022',
-  'claude-3-7-sonnet-20250219',
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash-lite',
-  'qwen-plus',
-  'qwen-max',
-  'kimi-k2',
-  'kimi-latest',
-];
+
 import styles from './VisualConfigEditor.module.scss';
 import { copyToClipboard } from '@/utils/clipboard';
 import type {
@@ -239,17 +224,15 @@ function ApiKeysCardEditor({
       try {
         const normalizedPreferredProvider = normalizeProvider(preferredProvider);
         const provider = normalizedPreferredProvider || resolveProviderFromLabel(label);
-        const providerRequests = provider
-          ? [authFilesApi.getModelDefinitions(provider).catch(() => [])]
-          : ALL_MODEL_PROVIDERS.map((item) => authFilesApi.getModelDefinitions(item).catch(() => []));
 
-        const [fromAllStatic, fromAuth, ...providerLists] = await Promise.all([
-          authFilesApi.getAllModelDefinitions().catch(() => []),
-          key ? authFilesApi.getModelsForAuthFile(key).catch(() => []) : Promise.resolve([]),
-          ...providerRequests,
-        ]);
+        const fromAuth = key ? await authFilesApi.getModelsForAuthFile(key).catch(() => []) : [];
 
-        const merged = [...fromAllStatic, ...providerLists.flat(), ...fromAuth]
+        let providerModels: { id: string }[] = [];
+        if (provider) {
+          providerModels = await authFilesApi.getModelDefinitions(provider).catch(() => []);
+        }
+
+        const merged = [...fromAuth, ...providerModels]
           .map((item) => String(item?.id || '').trim())
           .filter(Boolean);
 
@@ -262,7 +245,7 @@ function ApiKeysCardEditor({
           deduped.push(item);
         });
 
-        setAvailableModels(deduped.length > 0 ? deduped : FALLBACK_MODEL_LIBRARY);
+        setAvailableModels(deduped);
       } finally {
         setLoadingModels(false);
       }
