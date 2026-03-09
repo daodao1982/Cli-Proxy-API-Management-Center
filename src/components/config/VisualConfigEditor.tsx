@@ -47,6 +47,7 @@ import { isValidApiKeyCharset } from '@/utils/validation';
 
 interface VisualConfigEditorProps {
   values: VisualConfigValues;
+  validationErrors?: unknown;
   disabled?: boolean;
   onChange: (values: Partial<VisualConfigValues>) => void;
 }
