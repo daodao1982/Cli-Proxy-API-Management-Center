@@ -244,6 +244,32 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
+.modelHealthDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-left: 4px;
+  background: var(--text-tertiary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+}
+
+.modelHealthDotok {
+  background: #22c55e;
+}
+
+.modelHealthDotwarn {
+  background: #f59e0b;
+}
+
+.modelHealthDoterror {
+  background: #ef4444;
+}
+
+.modelHealthDotidle {
+  background: #94a3b8;
+}
+
 .modelName {
   color: var(--text-primary);
   font-weight: 600;

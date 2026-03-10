@@ -8,9 +8,11 @@ import { IconGithub, IconBookOpen, IconExternalLink, IconCode } from '@/componen
 import { useAuthStore, useConfigStore, useNotificationStore, useModelsStore, useThemeStore } from '@/stores';
 import { configApi } from '@/services/api';
 import { apiKeysApi } from '@/services/api/apiKeys';
-import { classifyModels } from '@/utils/models';
+import { logsApi } from '@/services/api/logs';
+import { classifyModels, type ModelInfo } from '@/utils/models';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
+import { parseLogLine } from '@/pages/hooks/logParsing';
 import iconGemini from '@/assets/icons/gemini.svg';
 import iconClaude from '@/assets/icons/claude.svg';
 import iconOpenaiLight from '@/assets/icons/openai-light.svg';
@@ -56,6 +58,7 @@ export function SystemPage() {
   const [requestLogDraft, setRequestLogDraft] = useState(false);
   const [requestLogTouched, setRequestLogTouched] = useState(false);
   const [requestLogSaving, setRequestLogSaving] = useState(false);
+  const [modelHealthMap, setModelHealthMap] = useState<Record<string, { total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' }>>({});
 
   const apiKeysCache = useRef<string[]>([]);
   const versionTapCount = useRef(0);
@@ -93,6 +96,15 @@ export function SystemPage() {
     if (typeof iconEntry === 'string') return iconEntry;
     return resolvedTheme === 'dark' ? iconEntry.dark : iconEntry.light;
   };
+
+  const resolveModelHealth = useCallback(
+    (model: ModelInfo): { total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' } => {
+      const key = (model.alias || model.name || '').toLowerCase();
+      if (!key) return { total: 0, errors: 0, status: 'idle' };
+      return modelHealthMap[key] ?? { total: 0, errors: 0, status: 'idle' };
+    },
+    [modelHealthMap]
+  );
 
   const normalizeApiKeyList = (input: unknown): string[] => {
     if (!Array.isArray(input)) return [];
@@ -280,6 +292,75 @@ export function SystemPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.connectionStatus, auth.apiBase]);
 
+  useEffect(() => {
+    if (auth.connectionStatus !== 'connected') {
+      setModelHealthMap({});
+      return;
+    }
+
+    let cancelled = false;
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+
+    const loadHealth = async () => {
+      try {
+        const response = await logsApi.fetchLogs();
+        const parsed = response.lines.map((line) => parseLogLine(line));
+        const recent = parsed.filter((line) => {
+          if (!line.timestamp) return false;
+          const ts = Date.parse(line.timestamp);
+          if (Number.isNaN(ts)) return false;
+          return ts >= tenMinutesAgo;
+        });
+
+        const nextMap: Record<string, { total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' }> = {};
+
+        recent.forEach((line) => {
+          const match = line.message?.match(/\bmodel[=:]\s*"?([a-zA-Z0-9._\-/]+)"?/i);
+          const modelName = match?.[1];
+          if (!modelName) return;
+          const key = modelName.toLowerCase();
+          if (!nextMap[key]) {
+            nextMap[key] = { total: 0, errors: 0, status: 'idle' };
+          }
+          nextMap[key].total += 1;
+          if (line.statusCode && line.statusCode >= 400) {
+            nextMap[key].errors += 1;
+          }
+        });
+
+        Object.values(nextMap).forEach((entry) => {
+          if (entry.total === 0) {
+            entry.status = 'idle';
+            return;
+          }
+          const errorRate = entry.errors / entry.total;
+          if (errorRate >= 0.3) {
+            entry.status = 'error';
+          } else if (errorRate >= 0.1) {
+            entry.status = 'warn';
+          } else {
+            entry.status = 'ok';
+          }
+        });
+
+        if (!cancelled) {
+          setModelHealthMap(nextMap);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setModelHealthMap({});
+        }
+      }
+    };
+
+    loadHealth();
+    const timer = window.setInterval(loadHealth, 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [auth.connectionStatus]);
+
   return (
     <div className={styles.container}>
       <h1 className={styles.pageTitle}>{t('system_info.title')}</h1>
@@ -434,16 +515,23 @@ export function SystemPage() {
                     <div className="item-subtitle">{t('system_info.models_count', { count: group.items.length })}</div>
                   </div>
                   <div className={styles.modelTags}>
-                    {group.items.map((model) => (
-                      <span
-                        key={`${model.name}-${model.alias ?? 'default'}`}
-                        className={styles.modelTag}
-                        title={model.description || ''}
-                      >
-                        <span className={styles.modelName}>{model.name}</span>
-                        {model.alias && <span className={styles.modelAlias}>{model.alias}</span>}
-                      </span>
-                    ))}
+                    {group.items.map((model) => {
+                      const health = resolveModelHealth(model);
+                      return (
+                        <span
+                          key={`${model.name}-${model.alias ?? 'default'}`}
+                          className={styles.modelTag}
+                          title={model.description || ''}
+                        >
+                          <span className={styles.modelName}>{model.name}</span>
+                          {model.alias && <span className={styles.modelAlias}>{model.alias}</span>}
+                          <span
+                            className={`${styles.modelHealthDot} ${styles[`modelHealthDot${health.status}`]}`}
+                            title={`10m ${health.total} / ${health.errors}`}
+                          />
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               );
