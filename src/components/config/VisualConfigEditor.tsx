@@ -6,9 +6,10 @@ import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { ConfigSection } from '@/components/config/ConfigSection';
-import { useNotificationStore } from '@/stores';
+import { useAuthStore, useNotificationStore } from '@/stores';
 import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
 import { authFilesApi } from '@/services/api/authFiles';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 
 const MODEL_PROVIDER_OPTIONS = [
   { value: '', label: '自动识别' },
@@ -401,7 +402,16 @@ function ApiKeysCardEditor({
         });
       }
       await loadLifecycle();
-      showNotification(`${t('notification.api_key_updated')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`, 'success');
+      showNotification(
+        buildSaveReceipt({
+          operation: t('notification.api_key_updated'),
+          isCreate: editingIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
+        'success'
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : '设置生命周期失败';
       showNotification(message, 'warning');
@@ -1166,7 +1176,9 @@ function PayloadFilterRulesEditor({
 }
 
 export function VisualConfigEditor({ values, disabled = false, onChange }: VisualConfigEditorProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
   const isKeepaliveDisabled = values.streaming.keepaliveSeconds === '' || values.streaming.keepaliveSeconds === '0';
   const isNonstreamKeepaliveDisabled =
     values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0';

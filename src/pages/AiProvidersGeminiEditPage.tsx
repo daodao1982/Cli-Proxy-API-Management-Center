@@ -18,6 +18,7 @@ import type { ModelInfo } from '@/utils/models';
 import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
 import type { GeminiFormState } from '@/components/providers';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
@@ -71,7 +72,7 @@ const buildGeminiSignature = (form: GeminiFormState) =>
   });
 
 export function AiProvidersGeminiEditPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams<{ index?: string }>();
@@ -83,6 +84,8 @@ export function AiProvidersGeminiEditPage() {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const updateConfigValue = useConfigStore((state) => state.updateConfigValue);
   const clearCache = useConfigStore((state) => state.clearCache);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
   const [configs, setConfigs] = useState<GeminiKeyConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -374,7 +377,13 @@ export function AiProvidersGeminiEditPage() {
       updateConfigValue('gemini-api-key', nextList);
       clearCache('gemini-api-key');
       showNotification(
-        `${editIndex !== null ? t('notification.gemini_key_updated') : t('notification.gemini_key_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
+        buildSaveReceipt({
+          operation: editIndex !== null ? t('notification.gemini_key_updated') : t('notification.gemini_key_added'),
+          isCreate: editIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
         'success'
       );
       allowNextNavigation();
@@ -398,6 +407,9 @@ export function AiProvidersGeminiEditPage() {
     showNotification,
     t,
     updateConfigValue,
+    i18n,
+    serverVersion,
+    serverBuildDate,
   ]);
 
   const canOpenModelDiscovery = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex;

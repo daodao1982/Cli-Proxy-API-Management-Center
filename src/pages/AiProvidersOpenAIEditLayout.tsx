@@ -12,6 +12,7 @@ import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/u
 import { buildApiKeyEntry } from '@/components/providers/utils';
 import type { ModelEntry, OpenAIFormState } from '@/components/providers/types';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 
 type LocationState = { fromAiProviders?: boolean } | null;
 
@@ -117,7 +118,7 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
   });
 
 export function AiProvidersOpenAIEditLayout() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { showNotification } = useNotificationStore();
@@ -133,6 +134,8 @@ export function AiProvidersOpenAIEditLayout() {
   const config = useConfigStore((state) => state.config);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const isCacheValid = useConfigStore((state) => state.isCacheValid);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
   const [providers, setProviders] = useState<OpenAIProviderConfig[]>(
     () => config?.openaiCompatibility ?? []
@@ -439,9 +442,13 @@ export function AiProvidersOpenAIEditLayout() {
 
       setProviders(syncedProviders);
       showNotification(
-        `${editIndex !== null
-          ? t('notification.openai_provider_updated')
-          : t('notification.openai_provider_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
+        buildSaveReceipt({
+          operation: editIndex !== null ? t('notification.openai_provider_updated') : t('notification.openai_provider_added'),
+          isCreate: editIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
         'success'
       );
       allowNextNavigation();
@@ -464,6 +471,9 @@ export function AiProvidersOpenAIEditLayout() {
     showNotification,
     t,
     testModel,
+    i18n,
+    serverVersion,
+    serverBuildDate,
   ]);
 
   return (

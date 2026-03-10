@@ -19,6 +19,7 @@ import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputList
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
 import type { ProviderFormState } from '@/components/providers';
 import type { ModelInfo } from '@/utils/models';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
@@ -77,7 +78,7 @@ const buildCodexSignature = (form: ProviderFormState) =>
   });
 
 export function AiProvidersCodexEditPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams<{ index?: string }>();
@@ -89,6 +90,8 @@ export function AiProvidersCodexEditPage() {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const updateConfigValue = useConfigStore((state) => state.updateConfigValue);
   const clearCache = useConfigStore((state) => state.clearCache);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
   const [configs, setConfigs] = useState<ProviderKeyConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -374,7 +377,13 @@ export function AiProvidersCodexEditPage() {
       updateConfigValue('codex-api-key', nextList);
       clearCache('codex-api-key');
       showNotification(
-        `${editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
+        buildSaveReceipt({
+          operation: editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
+          isCreate: editIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
         'success'
       );
       allowNextNavigation();
@@ -398,6 +407,9 @@ export function AiProvidersCodexEditPage() {
     showNotification,
     t,
     updateConfigValue,
+    i18n,
+    serverVersion,
+    serverBuildDate,
   ]);
 
   const canOpenModelDiscovery =

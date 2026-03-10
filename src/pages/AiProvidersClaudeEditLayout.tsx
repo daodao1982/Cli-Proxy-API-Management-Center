@@ -11,6 +11,7 @@ import type { ModelEntry, ProviderFormState } from '@/components/providers/types
 import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
 import { modelsToEntries } from '@/components/ui/modelInputListUtils';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 
 type LocationState = { fromAiProviders?: boolean } | null;
 
@@ -104,7 +105,7 @@ const buildClaudeSignature = (form: ProviderFormState) =>
   });
 
 export function AiProvidersClaudeEditLayout() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { showNotification } = useNotificationStore();
@@ -122,6 +123,8 @@ export function AiProvidersClaudeEditLayout() {
   const isCacheValid = useConfigStore((state) => state.isCacheValid);
   const updateConfigValue = useConfigStore((state) => state.updateConfigValue);
   const clearCache = useConfigStore((state) => state.clearCache);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
   const [configs, setConfigs] = useState<ProviderKeyConfig[]>(() => config?.claudeApiKeys ?? []);
   const [loading, setLoading] = useState(() => !isCacheValid('claude-api-key'));
@@ -380,7 +383,13 @@ export function AiProvidersClaudeEditLayout() {
       updateConfigValue('claude-api-key', nextList);
       clearCache('claude-api-key');
       showNotification(
-        `${editIndex !== null ? t('notification.claude_config_updated') : t('notification.claude_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
+        buildSaveReceipt({
+          operation: editIndex !== null ? t('notification.claude_config_updated') : t('notification.claude_config_added'),
+          isCreate: editIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
         'success'
       );
       allowNextNavigation();
@@ -408,6 +417,9 @@ export function AiProvidersClaudeEditLayout() {
     showNotification,
     t,
     updateConfigValue,
+    i18n,
+    serverVersion,
+    serverBuildDate,
   ]);
 
   return (

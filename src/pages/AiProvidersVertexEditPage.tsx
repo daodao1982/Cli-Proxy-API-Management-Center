@@ -16,6 +16,7 @@ import type { ProviderKeyConfig } from '@/types';
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
 import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
 import type { VertexFormState } from '@/components/providers';
+import { buildSaveReceipt } from '@/utils/saveReceipt';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 
 type LocationState = { fromAiProviders?: boolean } | null;
@@ -61,7 +62,7 @@ const buildVertexSignature = (form: VertexFormState) =>
   });
 
 export function AiProvidersVertexEditPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams<{ index?: string }>();
@@ -73,6 +74,8 @@ export function AiProvidersVertexEditPage() {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const updateConfigValue = useConfigStore((state) => state.updateConfigValue);
   const clearCache = useConfigStore((state) => state.clearCache);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
   const [configs, setConfigs] = useState<ProviderKeyConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -230,7 +233,13 @@ export function AiProvidersVertexEditPage() {
       updateConfigValue('vertex-api-key', nextList);
       clearCache('vertex-api-key');
       showNotification(
-        `${editIndex !== null ? t('notification.vertex_config_updated') : t('notification.vertex_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
+        buildSaveReceipt({
+          operation: editIndex !== null ? t('notification.vertex_config_updated') : t('notification.vertex_config_added'),
+          isCreate: editIndex === null,
+          serverVersion,
+          serverBuildDate,
+          locale: i18n.language,
+        }),
         'success'
       );
       allowNextNavigation();
@@ -254,6 +263,9 @@ export function AiProvidersVertexEditPage() {
     showNotification,
     t,
     updateConfigValue,
+    i18n,
+    serverVersion,
+    serverBuildDate,
   ]);
 
   return (
