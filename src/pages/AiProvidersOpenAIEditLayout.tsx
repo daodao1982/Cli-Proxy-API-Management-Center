@@ -439,9 +439,9 @@ export function AiProvidersOpenAIEditLayout() {
 
       setProviders(syncedProviders);
       showNotification(
-        editIndex !== null
+        `${editIndex !== null
           ? t('notification.openai_provider_updated')
-          : t('notification.openai_provider_added'),
+          : t('notification.openai_provider_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
         'success'
       );
       allowNextNavigation();

@@ -1396,6 +1396,7 @@
     "force_model_prefix_updated": "Model prefix setting updated",
     "ws_auth_updated": "WebSocket authentication setting updated",
     "routing_strategy_updated": "Routing strategy updated",
+    "save_receipt": "Saved to server {{time}}",
     "login_storage_cleared": "Local login data cleared",
     "api_key_added": "API key added successfully",
     "api_key_updated": "API key updated successfully",

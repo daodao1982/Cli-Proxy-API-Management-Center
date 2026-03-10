@@ -374,7 +374,7 @@ export function AiProvidersGeminiEditPage() {
       updateConfigValue('gemini-api-key', nextList);
       clearCache('gemini-api-key');
       showNotification(
-        editIndex !== null ? t('notification.gemini_key_updated') : t('notification.gemini_key_added'),
+        `${editIndex !== null ? t('notification.gemini_key_updated') : t('notification.gemini_key_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
         'success'
       );
       allowNextNavigation();

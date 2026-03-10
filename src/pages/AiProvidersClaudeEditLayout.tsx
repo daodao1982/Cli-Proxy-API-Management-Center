@@ -380,7 +380,7 @@ export function AiProvidersClaudeEditLayout() {
       updateConfigValue('claude-api-key', nextList);
       clearCache('claude-api-key');
       showNotification(
-        editIndex !== null ? t('notification.claude_config_updated') : t('notification.claude_config_added'),
+        `${editIndex !== null ? t('notification.claude_config_updated') : t('notification.claude_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
         'success'
       );
       allowNextNavigation();

@@ -75,6 +75,17 @@ export function SystemPage() {
   const buildTime = auth.serverBuildDate
     ? new Date(auth.serverBuildDate).toLocaleString(i18n.language)
     : t('system_info.version_unknown');
+  const modelPrimary = config?.raw?.['models.primary'] ? String(config.raw['models.primary']) : '';
+  const modelFallbackRaw = config?.raw?.['models.fallback'] ?? config?.raw?.['models.fallbacks'];
+  const modelFallbacks = Array.isArray(modelFallbackRaw)
+    ? (modelFallbackRaw as unknown[]).map((item) => String(item)).filter(Boolean)
+    : typeof modelFallbackRaw === 'string'
+      ? modelFallbackRaw
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+  const modelSwitchUpdatedAt = config?.raw?.['models.updated-at'] || config?.raw?.['models.updatedAt'] || '';
 
   const getIconForCategory = (categoryId: string): string | null => {
     const iconEntry = MODEL_CATEGORY_ICONS[categoryId];
@@ -381,6 +392,28 @@ export function SystemPage() {
         }
       >
         <p className={styles.sectionDescription}>{t('system_info.models_desc')}</p>
+        {(modelPrimary || modelFallbacks.length > 0 || modelSwitchUpdatedAt) && (
+          <div className={styles.modelMeta}> 
+            {modelPrimary && (
+              <div className={styles.modelMetaRow}>
+                <span className={styles.modelMetaLabel}>{t('system_info.models_primary_label')}</span>
+                <span className={styles.modelMetaValue}>{modelPrimary}</span>
+              </div>
+            )}
+            {modelFallbacks.length > 0 && (
+              <div className={styles.modelMetaRow}>
+                <span className={styles.modelMetaLabel}>{t('system_info.models_fallback_label')}</span>
+                <span className={styles.modelMetaValue}>{modelFallbacks.join(' / ')}</span>
+              </div>
+            )}
+            {modelSwitchUpdatedAt && (
+              <div className={styles.modelMetaRow}>
+                <span className={styles.modelMetaLabel}>{t('system_info.models_updated_label')}</span>
+                <span className={styles.modelMetaValue}>{String(modelSwitchUpdatedAt)}</span>
+              </div>
+            )}
+          </div>
+        )}
         {modelStatus && <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>}
         {modelsError && <div className="error-box">{modelsError}</div>}
         {modelsLoading ? (

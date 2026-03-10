@@ -401,6 +401,7 @@ function ApiKeysCardEditor({
         });
       }
       await loadLifecycle();
+      showNotification(`${t('notification.api_key_updated')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`, 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : '设置生命周期失败';
       showNotification(message, 'warning');

@@ -374,7 +374,7 @@ export function AiProvidersCodexEditPage() {
       updateConfigValue('codex-api-key', nextList);
       clearCache('codex-api-key');
       showNotification(
-        editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
+        `${editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
         'success'
       );
       allowNextNavigation();

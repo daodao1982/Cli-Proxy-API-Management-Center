@@ -230,7 +230,7 @@ export function AiProvidersVertexEditPage() {
       updateConfigValue('vertex-api-key', nextList);
       clearCache('vertex-api-key');
       showNotification(
-        editIndex !== null ? t('notification.vertex_config_updated') : t('notification.vertex_config_added'),
+        `${editIndex !== null ? t('notification.vertex_config_updated') : t('notification.vertex_config_added')} · ${t('notification.save_receipt', { time: new Date().toLocaleString() })}`,
         'success'
       );
       allowNextNavigation();
