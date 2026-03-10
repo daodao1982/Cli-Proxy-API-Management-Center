@@ -59,14 +59,16 @@ export function SystemPage() {
   const [requestLogTouched, setRequestLogTouched] = useState(false);
   const [requestLogSaving, setRequestLogSaving] = useState(false);
   const [modelHealthMap, setModelHealthMap] = useState<Record<string, { total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' }>>({});
+  const [modelHealthExpanded, setModelHealthExpanded] = useState(false);
 
   const apiKeysCache = useRef<string[]>([]);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const isZh = i18n.language?.toLowerCase().startsWith('zh');
   const otherLabel = useMemo(
-    () => (i18n.language?.toLowerCase().startsWith('zh') ? '其他' : 'Other'),
-    [i18n.language]
+    () => (isZh ? '其他' : 'Other'),
+    [isZh]
   );
   const groupedModels = useMemo(() => classifyModels(models, { otherLabel }), [models, otherLabel]);
   const requestLogEnabled = config?.requestLog ?? false;
@@ -105,6 +107,21 @@ export function SystemPage() {
     },
     [modelHealthMap]
   );
+
+  const healthSummary = useMemo(() => {
+    const entries = Object.values(modelHealthMap);
+    const base = { ok: 0, warn: 0, error: 0, idle: 0, total: 0, errors: 0 };
+    return entries.reduce((acc, item) => {
+      acc.total += item.total;
+      acc.errors += item.errors;
+      acc[item.status] += 1;
+      return acc;
+    }, base);
+  }, [modelHealthMap]);
+
+  const toggleHealthExpanded = useCallback(() => {
+    setModelHealthExpanded((prev) => !prev);
+  }, []);
 
   const normalizeApiKeyList = (input: unknown): string[] => {
     if (!Array.isArray(input)) return [];
@@ -503,6 +520,34 @@ export function SystemPage() {
           <div className="hint">{t('system_info.models_empty')}</div>
         ) : (
           <div className="item-list">
+            <button type="button" className={styles.healthToggle} onClick={toggleHealthExpanded}>
+              <span className={styles.healthToggleLabel}>
+                {isZh ? '10分钟健康统计' : '10-min Health Summary'}
+              </span>
+              <div className={styles.healthSummaryDots}>
+                <span className={`${styles.healthDot} ${styles.healthDotOk}`} title={isZh ? '正常' : 'OK'} />
+                <span className={styles.healthSummaryValue}>{healthSummary.ok}</span>
+                <span className={`${styles.healthDot} ${styles.healthDotWarn}`} title={isZh ? '警告' : 'Warn'} />
+                <span className={styles.healthSummaryValue}>{healthSummary.warn}</span>
+                <span className={`${styles.healthDot} ${styles.healthDotError}`} title={isZh ? '异常' : 'Error'} />
+                <span className={styles.healthSummaryValue}>{healthSummary.error}</span>
+                <span className={`${styles.healthDot} ${styles.healthDotIdle}`} title={isZh ? '无流量' : 'Idle'} />
+                <span className={styles.healthSummaryValue}>{healthSummary.idle}</span>
+              </div>
+              <span className={styles.healthSummaryMeta}>
+                {healthSummary.total} req / {healthSummary.errors} err
+              </span>
+              <span className={styles.healthToggleCaret}>
+                {modelHealthExpanded ? '▾' : '▸'}
+              </span>
+            </button>
+            {modelHealthExpanded && (
+              <div className={styles.healthDetail}>
+                <div className={styles.healthDetailHint}>
+                  {isZh ? '统计最近10分钟请求，鼠标悬停模型圆点查看该模型详情。' : 'Counts are from last 10 minutes. Hover model dot for details.'}
+                </div>
+              </div>
+            )}
             {groupedModels.map((group) => {
               const iconSrc = getIconForCategory(group.id);
               return (
