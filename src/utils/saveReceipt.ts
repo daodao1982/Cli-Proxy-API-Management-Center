@@ -26,7 +26,7 @@ interface SaveReceiptOptions {
  * @returns 标准化提示字符串
  */
 export function buildSaveReceipt(options: SaveReceiptOptions): string {
-  const { type = 'success', operation, isCreate = false, serverVersion, serverBuildDate, locale } = options;
+  const { operation, isCreate = false, serverVersion, serverBuildDate, locale } = options;
 
   const actionText = isCreate ? '添加成功' : '已保存';
 

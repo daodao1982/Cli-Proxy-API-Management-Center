@@ -6,10 +6,10 @@ import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { ConfigSection } from '@/components/config/ConfigSection';
-import { useAuthStore, useNotificationStore } from '@/stores';
+import { useNotificationStore } from '@/stores';
 import { apiKeysApi, type ApiKeyLifecycleItem } from '@/services/api/apiKeys';
 import { authFilesApi } from '@/services/api/authFiles';
-import { buildSaveReceipt } from '@/utils/saveReceipt';
+import { useUnifiedSaveReceipt } from '@/hooks/useUnifiedSaveReceipt';
 
 const MODEL_PROVIDER_OPTIONS = [
   { value: '', label: '自动识别' },
@@ -114,6 +114,7 @@ function ApiKeysCardEditor({
 }) {
   const { t } = useTranslation();
   const { showNotification } = useNotificationStore();
+  const buildReceiptText = useUnifiedSaveReceipt();
   const apiKeys = useMemo(
     () =>
       value
@@ -403,12 +404,9 @@ function ApiKeysCardEditor({
       }
       await loadLifecycle();
       showNotification(
-        buildSaveReceipt({
+        buildReceiptText({
           operation: t('notification.api_key_updated'),
           isCreate: editingIndex === null,
-          serverVersion,
-          serverBuildDate,
-          locale: i18n.language,
         }),
         'success'
       );
@@ -1176,9 +1174,7 @@ function PayloadFilterRulesEditor({
 }
 
 export function VisualConfigEditor({ values, disabled = false, onChange }: VisualConfigEditorProps) {
-  const { t, i18n } = useTranslation();
-  const serverVersion = useAuthStore((state) => state.serverVersion);
-  const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
+  const { t } = useTranslation();
   const isKeepaliveDisabled = values.streaming.keepaliveSeconds === '' || values.streaming.keepaliveSeconds === '0';
   const isNonstreamKeepaliveDisabled =
     values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0';
