@@ -60,6 +60,7 @@ export function SystemPage() {
   const [requestLogSaving, setRequestLogSaving] = useState(false);
   const [modelHealthMap, setModelHealthMap] = useState<Record<string, { total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' }>>({});
   const [modelHealthExpanded, setModelHealthExpanded] = useState(false);
+  const [modelHealthDetails, setModelHealthDetails] = useState<Array<{ model: string; total: number; errors: number; status: 'ok' | 'warn' | 'error' | 'idle' }>>([]);
 
   const apiKeysCache = useRef<string[]>([]);
   const versionTapCount = useRef(0);
@@ -362,10 +363,20 @@ export function SystemPage() {
 
         if (!cancelled) {
           setModelHealthMap(nextMap);
+          const details = Object.entries(nextMap)
+            .map(([model, entry]) => ({
+              model,
+              total: entry.total,
+              errors: entry.errors,
+              status: entry.status
+            }))
+            .sort((a, b) => b.total - a.total);
+          setModelHealthDetails(details);
         }
       } catch (err) {
         if (!cancelled) {
           setModelHealthMap({});
+          setModelHealthDetails([]);
         }
       }
     };
@@ -544,8 +555,22 @@ export function SystemPage() {
             {modelHealthExpanded && (
               <div className={styles.healthDetail}>
                 <div className={styles.healthDetailHint}>
-                  {isZh ? '统计最近10分钟请求，鼠标悬停模型圆点查看该模型详情。' : 'Counts are from last 10 minutes. Hover model dot for details.'}
+                  {isZh ? '统计最近10分钟请求，按请求量排序。' : 'Counts from last 10 minutes, sorted by requests.'}
                 </div>
+                {modelHealthDetails.length === 0 ? (
+                  <div className={styles.healthDetailEmpty}>{isZh ? '暂无数据' : 'No data yet'}</div>
+                ) : (
+                  <div className={styles.healthDetailList}>
+                    {modelHealthDetails.map((item) => (
+                      <div key={item.model} className={styles.healthDetailRow}>
+                        <span className={styles.healthDetailName}>{item.model}</span>
+                        <span className={`${styles.healthDot} ${styles[`healthDot${item.status.charAt(0).toUpperCase()}${item.status.slice(1)}`]}`} />
+                        <span className={styles.healthDetailValue}>{item.total} req</span>
+                        <span className={styles.healthDetailValue}>{item.errors} err</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {groupedModels.map((group) => {
