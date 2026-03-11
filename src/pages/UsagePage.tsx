@@ -29,6 +29,7 @@ import {
   TokenBreakdownChart,
   CostTrendChart,
   ServiceHealthCard,
+  ApiKeyRiskCard,
   useUsageData,
   useSparklines,
   useChartData
@@ -366,6 +367,17 @@ export function UsagePage() {
       </div>
 
       <RequestEventsDetailsCard
+        usage={filteredUsage}
+        loading={loading}
+        geminiKeys={config?.geminiApiKeys || []}
+        claudeConfigs={config?.claudeApiKeys || []}
+        codexConfigs={config?.codexApiKeys || []}
+        vertexConfigs={config?.vertexApiKeys || []}
+        openaiProviders={config?.openaiCompatibility || []}
+      />
+
+      {/* API Key Risk */}
+      <ApiKeyRiskCard
         usage={filteredUsage}
         loading={loading}
         geminiKeys={config?.geminiApiKeys || []}
