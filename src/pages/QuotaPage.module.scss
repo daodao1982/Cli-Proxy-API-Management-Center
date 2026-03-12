@@ -63,6 +63,26 @@
   box-sizing: border-box;
 }
 
+.selectionBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-color);
+  background-color: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  box-sizing: border-box;
+}
+
+.batchActionsInline {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
 .errorBox {
   padding: $spacing-md;
   background-color: rgba($error-color, 0.1);

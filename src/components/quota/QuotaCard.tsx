@@ -7,7 +7,7 @@ import type { ReactElement, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { IconTrash2 } from '@/components/ui/icons';
+import { IconCheck, IconTrash2 } from '@/components/ui/icons';
 import type { AuthFileItem, ResolvedTheme, ThemeColors } from '@/types';
 import { TYPE_COLORS } from '@/utils/quota';
 import styles from '@/pages/QuotaPage.module.scss';
@@ -69,6 +69,9 @@ interface QuotaCardProps<TState extends QuotaStatusState> {
   defaultType: string;
   deleting?: boolean;
   deleteDisabled?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (name: string) => void;
   onDelete?: (name: string) => void;
   renderQuotaItems: (quota: TState, t: TFunction, helpers: QuotaRenderHelpers) => ReactNode;
 }
@@ -83,6 +86,9 @@ export function QuotaCard<TState extends QuotaStatusState>({
   defaultType,
   deleting = false,
   deleteDisabled = false,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
   onDelete,
   renderQuotaItems
 }: QuotaCardProps<TState>) {
@@ -112,6 +118,20 @@ export function QuotaCard<TState extends QuotaStatusState>({
   return (
     <div className={`${styles.fileCard} ${cardClassName}`}>
       <div className={styles.cardHeader}>
+        {selectable && onToggleSelect && (
+          <button
+            type="button"
+            className={`${styles.selectionToggle} ${selected ? styles.selectionToggleActive : ''}`}
+            onClick={() => onToggleSelect(item.name)}
+            aria-label={
+              selected ? t('auth_files.batch_deselect') : t('auth_files.batch_select_all')
+            }
+            aria-pressed={selected}
+            title={selected ? t('auth_files.batch_deselect') : t('auth_files.batch_select_all')}
+          >
+            {selected && <IconCheck size={12} />}
+          </button>
+        )}
         <span
           className={styles.typeBadge}
           style={{

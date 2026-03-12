@@ -34,6 +34,7 @@ interface QuotaPaginationState<T> {
   totalPages: number;
   currentPage: number;
   pageItems: T[];
+  visibleItems: T[];
   setPageSize: (size: number) => void;
   goToPrev: () => void;
   goToNext: () => void;
@@ -60,6 +61,8 @@ const useQuotaPagination = <T,>(items: T[], defaultPageSize = 6): QuotaPaginatio
     return items.slice(start, start + pageSize);
   }, [items, currentPage, pageSize]);
 
+  const visibleItems = useMemo(() => items.slice(), [items]);
+
   const setPageSize = useCallback((size: number) => {
     setPageSizeState(size);
     setPage(1);
@@ -83,6 +86,7 @@ const useQuotaPagination = <T,>(items: T[], defaultPageSize = 6): QuotaPaginatio
     totalPages,
     currentPage,
     pageItems,
+    visibleItems,
     setPageSize,
     goToPrev,
     goToNext,
@@ -129,6 +133,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     totalPages,
     currentPage,
     pageItems,
+    visibleItems,
     setPageSize,
     goToPrev,
     goToNext,
@@ -166,6 +171,27 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
 
   const [deletingName, setDeletingName] = useState<string | null>(null);
 
+  const toggleSelect = useCallback((name: string) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAllVisible = useCallback((items: AuthFileItem[]) => {
+    const nextSelected = items.map((file) => file.name);
+    setSelectedFiles(new Set(nextSelected));
+  }, []);
+
+  const deselectAll = useCallback(() => {
+    setSelectedFiles(new Set());
+  }, []);
+
   const handleDelete = useCallback(
     (name: string) => {
       showConfirmation({
@@ -184,6 +210,73 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
           } finally {
             setDeletingName(null);
           }
+          setSelectedFiles((prev) => {
+            if (!prev.has(name)) return prev;
+            const next = new Set(prev);
+            next.delete(name);
+            return next;
+          });
+          await triggerHeaderRefresh();
+        }
+      });
+    },
+    [showConfirmation, showNotification, t]
+  );
+
+  const batchDelete = useCallback(
+    (names: string[]) => {
+      const uniqueNames = Array.from(new Set(names));
+      if (uniqueNames.length === 0) return;
+
+      showConfirmation({
+        title: t('auth_files.batch_delete_title'),
+        message: t('auth_files.batch_delete_confirm', { count: uniqueNames.length }),
+        variant: 'danger',
+        confirmText: t('common.confirm'),
+        onConfirm: async () => {
+          const results = await Promise.allSettled(
+            uniqueNames.map((itemName) => authFilesApi.deleteFile(itemName))
+          );
+
+          const deleted: string[] = [];
+          let failCount = 0;
+          results.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+              deleted.push(uniqueNames[index]);
+            } else {
+              failCount++;
+            }
+          });
+
+          if (deleted.length > 0) {
+            showNotification(`${t('auth_files.delete_all_success')} (${deleted.length})`, 'success');
+          }
+          if (failCount > 0) {
+            showNotification(
+              t('auth_files.delete_filtered_partial', {
+                success: deleted.length,
+                failed: failCount,
+                type: t('auth_files.filter_all')
+              }),
+              'warning'
+            );
+          }
+
+          setSelectedFiles((prev) => {
+            if (prev.size === 0) return prev;
+            const deletedSet = new Set(deleted);
+            let changed = false;
+            const next = new Set<string>();
+            prev.forEach((entry) => {
+              if (deletedSet.has(entry)) {
+                changed = true;
+              } else {
+                next.add(entry);
+              }
+            });
+            return changed ? next : prev;
+          });
+
           await triggerHeaderRefresh();
         }
       });
@@ -193,6 +286,9 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
 
   const pendingQuotaRefreshRef = useRef(false);
   const prevFilesLoadingRef = useRef(loading);
+
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const selectionCount = selectedFiles.size;
 
   const handleRefresh = useCallback(() => {
     pendingQuotaRefreshRef.current = true;
@@ -218,6 +314,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     if (loading) return;
     if (filteredFiles.length === 0) {
       setQuota({});
+      setSelectedFiles(new Set());
       return;
     }
     setQuota((prev) => {
@@ -232,12 +329,34 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     });
   }, [filteredFiles, loading, setQuota]);
 
+  useEffect(() => {
+    if (selectedFiles.size === 0) return;
+    const existingNames = new Set(filteredFiles.map((file) => file.name));
+    setSelectedFiles((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((name) => {
+        if (existingNames.has(name)) {
+          next.add(name);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [filteredFiles, selectedFiles.size]);
+
   const titleNode = (
     <div className={styles.titleWrapper}>
       <span>{t(`${config.i18nPrefix}.title`)}</span>
       {filteredFiles.length > 0 && (
         <span className={styles.countBadge}>
           {filteredFiles.length}
+        </span>
+      )}
+      {selectionCount > 0 && (
+        <span className={styles.selectionBadge}>
+          {t('auth_files.batch_selected', { count: selectionCount })}
         </span>
       )}
     </div>
@@ -272,6 +391,28 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
               {t('auth_files.view_mode_all')}
             </Button>
           </div>
+          {selectionCount > 0 && (
+            <div className={styles.batchActionsInline}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => selectAllVisible(visibleItems)}
+              >
+                {t('auth_files.batch_select_all')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={deselectAll}>
+                {t('auth_files.batch_deselect')}
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => batchDelete(Array.from(selectedFiles))}
+                disabled={disabled}
+              >
+                {t('common.delete')}
+              </Button>
+            </div>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -304,6 +445,9 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
                 cardIdleMessageKey={config.cardIdleMessageKey}
                 cardClassName={config.cardClassName}
                 defaultType={config.type}
+                selectable
+                selected={selectedFiles.has(item.name)}
+                onToggleSelect={toggleSelect}
                 onDelete={handleDelete}
                 deleting={deletingName === item.name}
                 deleteDisabled={disabled}
