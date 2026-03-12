@@ -5,6 +5,9 @@
 import { useTranslation } from 'react-i18next';
 import type { ReactElement, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
+import { Button } from '@/components/ui/Button';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { IconTrash2 } from '@/components/ui/icons';
 import type { AuthFileItem, ResolvedTheme, ThemeColors } from '@/types';
 import { TYPE_COLORS } from '@/utils/quota';
 import styles from '@/pages/QuotaPage.module.scss';
@@ -64,6 +67,9 @@ interface QuotaCardProps<TState extends QuotaStatusState> {
   cardIdleMessageKey?: string;
   cardClassName: string;
   defaultType: string;
+  deleting?: boolean;
+  deleteDisabled?: boolean;
+  onDelete?: (name: string) => void;
   renderQuotaItems: (quota: TState, t: TFunction, helpers: QuotaRenderHelpers) => ReactNode;
 }
 
@@ -75,6 +81,9 @@ export function QuotaCard<TState extends QuotaStatusState>({
   cardIdleMessageKey,
   cardClassName,
   defaultType,
+  deleting = false,
+  deleteDisabled = false,
+  onDelete,
   renderQuotaItems
 }: QuotaCardProps<TState>) {
   const { t } = useTranslation();
@@ -133,6 +142,25 @@ export function QuotaCard<TState extends QuotaStatusState>({
           <div className={styles.quotaMessage}>{t(idleMessageKey)}</div>
         )}
       </div>
+
+      {onDelete && (
+        <div className={styles.quotaCardActions}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => onDelete(item.name)}
+            className={styles.iconButton}
+            title={t('auth_files.delete_button')}
+            disabled={deleteDisabled || deleting}
+          >
+            {deleting ? (
+              <LoadingSpinner size={14} />
+            ) : (
+              <IconTrash2 className={styles.actionIcon} size={16} />
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,6 +16,8 @@ import { useQuotaLoader } from './useQuotaLoader';
 import type { QuotaConfig } from './quotaConfigs';
 import { useGridColumns } from './useGridColumns';
 import { IconRefreshCw } from '@/components/ui/icons';
+import { authFilesApi } from '@/services/api';
+import { useNotificationStore } from '@/stores';
 import styles from '@/pages/QuotaPage.module.scss';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
@@ -105,6 +107,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
 }: QuotaSectionProps<TState, TData>) {
   const { t } = useTranslation();
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
+  const { showNotification, showConfirmation } = useNotificationStore();
   const setQuota = useQuotaStore((state) => state[config.storeSetter]) as QuotaSetter<
     Record<string, TState>
   >;
@@ -160,6 +163,33 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
   }, [effectiveViewMode, columns, filteredFiles.length, setPageSize]);
 
   const { quota, loadQuota } = useQuotaLoader(config);
+
+  const [deletingName, setDeletingName] = useState<string | null>(null);
+
+  const handleDelete = useCallback(
+    (name: string) => {
+      showConfirmation({
+        title: t('auth_files.delete_title', { defaultValue: 'Delete File' }),
+        message: `${t('auth_files.delete_confirm')} "${name}" ?`,
+        variant: 'danger',
+        confirmText: t('common.confirm'),
+        onConfirm: async () => {
+          setDeletingName(name);
+          try {
+            await authFilesApi.deleteFile(name);
+            showNotification(t('auth_files.delete_success'), 'success');
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : '';
+            showNotification(`${t('notification.delete_failed')}: ${errorMessage}`, 'error');
+          } finally {
+            setDeletingName(null);
+          }
+          await triggerHeaderRefresh();
+        }
+      });
+    },
+    [showConfirmation, showNotification, t]
+  );
 
   const pendingQuotaRefreshRef = useRef(false);
   const prevFilesLoadingRef = useRef(loading);
@@ -274,6 +304,9 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
                 cardIdleMessageKey={config.cardIdleMessageKey}
                 cardClassName={config.cardClassName}
                 defaultType={config.type}
+                onDelete={handleDelete}
+                deleting={deletingName === item.name}
+                deleteDisabled={disabled}
                 renderQuotaItems={config.renderQuotaItems}
               />
             ))}

@@ -344,6 +344,28 @@
   }
 }
 
+.quotaCardActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-top: $spacing-sm;
+  margin-top: auto;
+}
+
+.iconButton:global(.btn.btn-sm) {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 6px;
+  gap: 0;
+}
+
+.actionIcon {
+  display: block;
+}
+
 .cardHeader {
   display: flex;
   align-items: center;
