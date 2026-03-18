@@ -34,20 +34,21 @@ const matchCategory = (text: string) => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-export function normalizeModelList(payload: unknown, { dedupe = false } = {}): ModelInfo[] {
+export function normalizeModelList(payload: unknown, { dedupe = false }: { dedupe?: boolean } = {}): ModelInfo[] {
   const toModel = (entry: unknown): ModelInfo | null => {
     if (typeof entry === 'string') {
-      return { name: entry };
+      return { id: entry, name: entry };
     }
     if (!isRecord(entry)) {
       return null;
     }
+    const id = entry.id || entry.name || entry.model || entry.value;
     const name = entry.id || entry.name || entry.model || entry.value;
     if (!name) return null;
 
     const alias = entry.alias || entry.display_name || entry.displayName;
     const description = entry.description || entry.note || entry.comment;
-    const model: ModelInfo = { name: String(name) };
+    const model: ModelInfo = { id: String(id), name: String(name) };
     if (alias && alias !== name) {
       model.alias = String(alias);
     }

@@ -4,7 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import type { ExpirationOption } from '@/types';
 import type { ModelInfo } from '@/utils/models';
 import styles from '@/pages/AuthFilesPage.module.scss';
@@ -73,6 +73,18 @@ export function AddAuthFileModal({ open, onClose, onConfirm }: AddAuthFileModalP
     { value: 'never', label: '永久' },
   ];
 
+  const handleToggleAllModels = (checked: boolean) => {
+    setSelectAllModels(checked);
+  };
+
+  const handleToggleModel = (modelId: string, checked: boolean) => {
+    if (checked) {
+      setAllowedModels([...allowedModels, modelId]);
+    } else {
+      setAllowedModels(allowedModels.filter((m) => m !== modelId));
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -95,7 +107,7 @@ export function AddAuthFileModal({ open, onClose, onConfirm }: AddAuthFileModalP
           <label>有效期</label>
           <Select
             value={expirationOption}
-            onChange={(e) => setExpirationOption(e.target.value as ExpirationOption)}
+            onChange={(value) => setExpirationOption(value as ExpirationOption)}
             options={expirationOptions}
           />
         </div>
@@ -117,25 +129,19 @@ export function AddAuthFileModal({ open, onClose, onConfirm }: AddAuthFileModalP
         {/* 模型限制 */}
         <div className={styles.formGroup}>
           <label>允许使用的模型</label>
-          <Checkbox
+          <ToggleSwitch
             checked={selectAllModels}
-            onChange={(e) => setSelectAllModels(e.target.checked)}
+            onChange={handleToggleAllModels}
             label="允许全部模型"
           />
           
           {!selectAllModels && DEFAULT_AVAILABLE_MODELS.length > 0 && (
             <div className={styles.modelList}>
               {DEFAULT_AVAILABLE_MODELS.map((model) => (
-                <Checkbox
+                <ToggleSwitch
                   key={model.id}
                   checked={allowedModels.includes(model.id)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setAllowedModels([...allowedModels, model.id]);
-                    } else {
-                      setAllowedModels(allowedModels.filter((m) => m !== model.id));
-                    }
-                  }}
+                  onChange={(checked: boolean) => handleToggleModel(model.id, checked)}
                   label={model.name || model.id}
                 />
               ))}

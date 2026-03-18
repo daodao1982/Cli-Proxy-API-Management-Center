@@ -95,7 +95,6 @@ export function AuthFilesPage() {
     statusUpdating,
     fileInputRef,
     loadFiles,
-    handleUploadClick,
     handleFileChange,
     handleDelete,
     handleDeleteAll,
