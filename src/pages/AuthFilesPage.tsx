@@ -37,6 +37,7 @@ import {
 import { AuthFileCard } from '@/features/authFiles/components/AuthFileCard';
 import { AuthFileDetailModal } from '@/features/authFiles/components/AuthFileDetailModal';
 import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileModelsModal';
+import { AddAuthFileModal } from '@/features/authFiles/components/AddAuthFileModal';
 import { AuthFilesPrefixProxyEditorModal } from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal';
 import { OAuthExcludedCard } from '@/features/authFiles/components/OAuthExcludedCard';
 import { OAuthModelAliasCard } from '@/features/authFiles/components/OAuthModelAliasCard';
@@ -73,6 +74,7 @@ export function AuthFilesPage() {
   const [pageSizeInput, setPageSizeInput] = useState('9');
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<AuthFileItem | null>(null);
+  const [addAuthModalOpen, setAddAuthModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
   const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
   const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
@@ -101,6 +103,7 @@ export function AuthFilesPage() {
     handleStatusToggle,
     toggleSelect,
     selectAllVisible,
+    prepareUpload,
     deselectAll,
     batchSetStatus,
     batchDelete,
@@ -491,7 +494,7 @@ export function AuthFilesPage() {
             </Button>
             <Button
               size="sm"
-              onClick={handleUploadClick}
+              onClick={() => setAddAuthModalOpen(true)}
               disabled={disableControls || uploading}
               loading={uploading}
             >
@@ -687,6 +690,15 @@ export function AuthFilesPage() {
         excluded={excluded}
         onClose={closeModelsModal}
         onCopyText={copyTextWithNotification}
+      />
+
+      <AddAuthFileModal
+        open={addAuthModalOpen}
+        onClose={() => setAddAuthModalOpen(false)}
+        onConfirm={(options) => {
+          prepareUpload(options);
+          setAddAuthModalOpen(false);
+        }}
       />
 
       <AuthFilesPrefixProxyEditorModal

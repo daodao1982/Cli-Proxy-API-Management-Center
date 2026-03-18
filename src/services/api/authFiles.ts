@@ -5,6 +5,7 @@
 import { apiClient } from './client';
 import type { AuthFilesResponse } from '@/types/authFile';
 import type { OAuthModelAliasEntry } from '@/types';
+import type { ExpirationOption } from '@/types';
 
 type StatusError = { status?: number };
 type AuthFileStatusResponse = { status: string; disabled: boolean };
@@ -129,15 +130,32 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
 
 const OAUTH_MODEL_ALIAS_ENDPOINT = '/oauth-model-alias';
 
+export interface UploadAuthFileOptions {
+  expirationOption?: ExpirationOption;
+  customExpirationHours?: number;
+  allowedModels?: string[];
+}
+
 export const authFilesApi = {
   list: () => apiClient.get<AuthFilesResponse>('/auth-files'),
 
   setStatus: (name: string, disabled: boolean) =>
     apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),
 
-  upload: (file: File) => {
+  upload: (file: File, options?: UploadAuthFileOptions) => {
     const formData = new FormData();
     formData.append('file', file, file.name);
+    if (options) {
+      if (options.expirationOption && options.expirationOption !== 'never') {
+        formData.append('expirationOption', options.expirationOption);
+      }
+      if (options.customExpirationHours) {
+        formData.append('customExpirationHours', String(options.customExpirationHours));
+      }
+      if (options.allowedModels && options.allowedModels.length > 0) {
+        formData.append('allowedModels', JSON.stringify(options.allowedModels));
+      }
+    }
     return apiClient.postForm('/auth-files', formData);
   },
 

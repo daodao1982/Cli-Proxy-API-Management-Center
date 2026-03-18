@@ -4,6 +4,7 @@
  */
 
 export interface ModelInfo {
+  id: string;
   name: string;
   alias?: string;
   description?: string;

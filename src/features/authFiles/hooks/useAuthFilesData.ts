@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { authFilesApi } from '@/services/api';
+import { authFilesApi, type UploadAuthFileOptions } from '@/services/api';
 import { apiClient } from '@/services/api/client';
 import { useNotificationStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
@@ -43,6 +43,9 @@ export type UseAuthFilesDataResult = {
   deselectAll: () => void;
   batchSetStatus: (names: string[], enabled: boolean) => Promise<void>;
   batchDelete: (names: string[]) => void;
+  pendingUploadOptions: UploadAuthFileOptions | null;
+  setPendingUploadOptions: (options: UploadAuthFileOptions | null) => void;
+  prepareUpload: (options: UploadAuthFileOptions) => void;
 };
 
 export type UseAuthFilesDataOptions = {
@@ -62,6 +65,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
   const [deletingAll, setDeletingAll] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [pendingUploadOptions, setPendingUploadOptions] = useState<UploadAuthFileOptions | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectionCount = selectedFiles.size;
@@ -123,6 +127,11 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
     fileInputRef.current?.click();
   }, []);
 
+  const prepareUpload = useCallback((options: UploadAuthFileOptions) => {
+    setPendingUploadOptions(options);
+    fileInputRef.current?.click();
+  }, []);
+
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const fileList = event.target.files;
@@ -166,7 +175,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
 
       for (const file of validFiles) {
         try {
-          await authFilesApi.upload(file);
+          await authFilesApi.upload(file, pendingUploadOptions || undefined);
           successCount++;
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -190,9 +199,10 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
       }
 
       setUploading(false);
+      setPendingUploadOptions(null);
       event.target.value = '';
     },
-    [loadFiles, refreshKeyStats, showNotification, t]
+    [loadFiles, refreshKeyStats, showNotification, t, pendingUploadOptions]
   );
 
   const handleDelete = useCallback(
@@ -555,6 +565,9 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
     selectAllVisible,
     deselectAll,
     batchSetStatus,
-    batchDelete
+    batchDelete,
+    pendingUploadOptions,
+    setPendingUploadOptions,
+    prepareUpload
   };
 }
