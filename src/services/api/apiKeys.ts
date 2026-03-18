@@ -37,7 +37,7 @@ export const apiKeysApi = {
 
   setLifecycle: (payload: {
     key: string;
-    preset: '12h' | '7d' | 'custom' | 'permanent';
+    preset: '12h' | '24h' | '7d' | '30d' | 'custom' | 'permanent';
     expiresAt?: string;
     label?: string;
     models?: string[];

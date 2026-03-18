@@ -150,7 +150,7 @@ function ApiKeysCardEditor({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [formError, setFormError] = useState('');
-  const [preset, setPreset] = useState<'12h' | '7d' | 'custom' | 'permanent' | 'disabled'>('12h');
+  const [preset, setPreset] = useState<'12h' | '24h' | '7d' | '30d' | 'custom' | 'permanent' | 'disabled'>('12h');
   const [customExpiresAt, setCustomExpiresAt] = useState('');
   const [labelValue, setLabelValue] = useState('');
   const [modelInputValue, setModelInputValue] = useState('');
@@ -162,7 +162,9 @@ function ApiKeysCardEditor({
   const lifecycleOptions = useMemo(
     () => [
       { value: '12h', label: '12h' },
+      { value: '24h', label: '24h' },
       { value: '7d', label: '7天' },
+      { value: '30d', label: '30天' },
       { value: 'custom', label: '自定义' },
       { value: 'permanent', label: '永久' },
       { value: 'disabled', label: '停用' },
@@ -318,7 +320,7 @@ function ApiKeysCardEditor({
     setFormError('');
     const nextPreset = life?.disabled
       ? 'disabled'
-      : ((life?.preset as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h');
+      : ((life?.preset as '12h' | '24h' | '7d' | '30d' | 'custom' | 'permanent' | 'disabled') || '12h');
     setPreset(nextPreset);
     setCustomExpiresAt(life?.expiresAt ? String(life.expiresAt).slice(0, 16) : '');
     setLabelValue(String(life?.label || ''));
@@ -700,7 +702,7 @@ function ApiKeysCardEditor({
             options={lifecycleOptions}
             disabled={disabled}
             onChange={(v) =>
-              setPreset((v as '12h' | '7d' | 'custom' | 'permanent' | 'disabled') || '12h')
+              setPreset((v as '12h' | '24h' | '7d' | '30d' | 'custom' | 'permanent' | 'disabled') || '12h')
             }
           />
         </div>
