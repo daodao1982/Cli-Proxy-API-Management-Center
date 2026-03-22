@@ -7,6 +7,7 @@ import type { ReactElement, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import type { AuthFileItem, ResolvedTheme, ThemeColors } from '@/types';
 import { Button } from '@/components/ui/Button';
+import { IconTrash2 } from '@/components/ui/icons';
 import { TYPE_COLORS } from '@/utils/quota';
 import styles from '@/pages/QuotaPage.module.scss';
 
@@ -123,7 +124,7 @@ export function QuotaCard<TState extends QuotaStatusState>({
         </div>
         {onDelete ? (
           <Button
-            variant="danger"
+            variant="ghost"
             size="sm"
             onClick={() => onDelete(item.name)}
             loading={deleting}
@@ -131,7 +132,7 @@ export function QuotaCard<TState extends QuotaStatusState>({
             title={t('common.delete')}
             aria-label={t('common.delete')}
           >
-            {t('common.delete')}
+            {!deleting ? <IconTrash2 size={14} /> : null}
           </Button>
         ) : null}
       </div>

@@ -362,6 +362,24 @@
 
 .cardDeleteButton {
   flex-shrink: 0;
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  color: var(--danger-color);
+  opacity: 0.78;
+
+  &:hover {
+    background: rgba($error-color, 0.10);
+    color: var(--danger-color);
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+
+  :global(svg) {
+    display: block;
+  }
 }
 
 .typeBadge {
