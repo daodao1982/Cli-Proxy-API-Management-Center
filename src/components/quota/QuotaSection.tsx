@@ -35,6 +35,7 @@ interface QuotaPaginationState<T> {
   currentPage: number;
   pageItems: T[];
   setPageSize: (size: number) => void;
+  setCurrentPage: (page: number) => void;
   goToPrev: () => void;
   goToNext: () => void;
   loading: boolean;
@@ -65,8 +66,11 @@ const useQuotaPagination = <T,>(items: T[], defaultPageSize = 6): QuotaPaginatio
   }, [items, currentPage, pageSize]);
 
   const setPageSize = useCallback((size: number) => {
-    setPageSizeState(size);
-    setPage(1);
+    setPageSizeState((prev) => (prev === size ? prev : size));
+  }, []);
+
+  const setCurrentPage = useCallback((nextPage: number) => {
+    setPage((prev) => (prev === nextPage ? prev : Math.max(1, nextPage)));
   }, []);
 
   const goToPrev = useCallback(() => {
@@ -88,6 +92,7 @@ const useQuotaPagination = <T,>(items: T[], defaultPageSize = 6): QuotaPaginatio
     currentPage,
     pageItems,
     setPageSize,
+    setCurrentPage,
     goToPrev,
     goToNext,
     loading,
@@ -135,6 +140,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     currentPage,
     pageItems,
     setPageSize,
+    setCurrentPage,
     goToPrev,
     goToNext,
     loading: sectionLoading,
@@ -234,8 +240,13 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
         onConfirm: async () => {
           setDeletingName(name);
           try {
+            const remainingCount = Math.max(0, filteredFiles.length - 1);
+            const nextTotalPages = effectiveViewMode === 'all'
+              ? 1
+              : Math.max(1, Math.ceil(remainingCount / pageSize));
             await authFilesApi.deleteFile(name);
             showNotification(t('auth_files.delete_success'), 'success');
+            setCurrentPage(Math.min(currentPage, nextTotalPages));
             pendingQuotaRefreshRef.current = true;
             void triggerHeaderRefresh();
           } catch (err: unknown) {
