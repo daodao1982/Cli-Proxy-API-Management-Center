@@ -53,6 +53,10 @@ const useQuotaPagination = <T,>(items: T[], defaultPageSize = 6): QuotaPaginatio
     [items.length, pageSize]
   );
 
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
   const currentPage = useMemo(() => Math.min(page, totalPages), [page, totalPages]);
 
   const pageItems = useMemo(() => {
@@ -159,7 +163,8 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
       setPageSize(Math.max(1, filteredFiles.length));
     } else {
       // Paged mode: 3 rows * columns, capped to avoid oversized pages.
-      setPageSize(Math.min(columns * 3, MAX_ITEMS_PER_PAGE));
+      const nextPageSize = Math.min(columns * 3, MAX_ITEMS_PER_PAGE);
+      setPageSize(nextPageSize);
     }
   }, [effectiveViewMode, columns, filteredFiles.length, setPageSize]);
 
