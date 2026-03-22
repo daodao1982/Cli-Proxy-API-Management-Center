@@ -346,9 +346,22 @@
 
 .cardHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: $spacing-sm;
   min-height: 28px;
+}
+
+.cardHeaderMain {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  min-width: 0;
+  flex: 1;
+}
+
+.cardDeleteButton {
+  flex-shrink: 0;
 }
 
 .typeBadge {

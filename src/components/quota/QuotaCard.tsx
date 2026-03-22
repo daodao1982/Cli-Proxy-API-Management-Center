@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { ReactElement, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import type { AuthFileItem, ResolvedTheme, ThemeColors } from '@/types';
+import { Button } from '@/components/ui/Button';
 import { TYPE_COLORS } from '@/utils/quota';
 import styles from '@/pages/QuotaPage.module.scss';
 
@@ -64,6 +65,8 @@ interface QuotaCardProps<TState extends QuotaStatusState> {
   cardIdleMessageKey?: string;
   cardClassName: string;
   defaultType: string;
+  onDelete?: (name: string) => void;
+  deleting?: boolean;
   renderQuotaItems: (quota: TState, t: TFunction, helpers: QuotaRenderHelpers) => ReactNode;
 }
 
@@ -75,6 +78,8 @@ export function QuotaCard<TState extends QuotaStatusState>({
   cardIdleMessageKey,
   cardClassName,
   defaultType,
+  onDelete,
+  deleting = false,
   renderQuotaItems
 }: QuotaCardProps<TState>) {
   const { t } = useTranslation();
@@ -103,17 +108,32 @@ export function QuotaCard<TState extends QuotaStatusState>({
   return (
     <div className={`${styles.fileCard} ${cardClassName}`}>
       <div className={styles.cardHeader}>
-        <span
-          className={styles.typeBadge}
-          style={{
-            backgroundColor: typeColor.bg,
-            color: typeColor.text,
-            ...(typeColor.border ? { border: typeColor.border } : {})
-          }}
-        >
-          {getTypeLabel(displayType)}
-        </span>
-        <span className={styles.fileName}>{item.name}</span>
+        <div className={styles.cardHeaderMain}>
+          <span
+            className={styles.typeBadge}
+            style={{
+              backgroundColor: typeColor.bg,
+              color: typeColor.text,
+              ...(typeColor.border ? { border: typeColor.border } : {})
+            }}
+          >
+            {getTypeLabel(displayType)}
+          </span>
+          <span className={styles.fileName}>{item.name}</span>
+        </div>
+        {onDelete ? (
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => onDelete(item.name)}
+            loading={deleting}
+            className={styles.cardDeleteButton}
+            title={t('common.delete')}
+            aria-label={t('common.delete')}
+          >
+            {t('common.delete')}
+          </Button>
+        ) : null}
       </div>
 
       <div className={styles.quotaSection}>
